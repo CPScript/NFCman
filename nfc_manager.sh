@@ -148,7 +148,7 @@ analyze_card() {
 show_menu() {
     echo ""
     echo "════════════════════════════════════"
-    echo "║     NFC CLONE MANAGER v1.0      ║"
+    echo "║           MANAGER v1.0           ║"
     echo "════════════════════════════════════"
     echo "║ 1. Read NFC Card                ║"
     echo "║ 2. List Saved Cards             ║"
