@@ -29,8 +29,8 @@ pip install nfcpy
 
 3. Clone the repository:
 ```bash
-git clone https://github.com/username/nfc-clone.git
-cd nfc-clone
+git clone https://github.com/CPScript/NFCman.git
+cd NFCman
 ```
 
 4. Run the installer:
@@ -46,7 +46,7 @@ chmod +x install.sh
 ## Project Structure
 
 ```
-nfc-clone/
+NFCman/
 ├── android/                # Android HCE app files
 │   ├── AndroidManifest.xml # App configuration
 │   ├── NfcEmulatorService.java # Card emulation service
