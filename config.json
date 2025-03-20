@@ -1,0 +1,27 @@
+{
+    "card_data_dir": "./cards",
+    "nfc_reader": "usb",
+    "enable_logging": true,
+    "log_file": "./logs/nfc_clone.log",
+    "supported_card_types": [
+        "MIFARE Classic",
+        "MIFARE Ultralight",
+        "FeliCa",
+        "ISO14443-4",
+        "NTAG213",
+        "NTAG215",
+        "NTAG216",
+        "DESFIRE"
+    ],
+    "emulation": {
+        "default_response": "9000",
+        "auto_start": false,
+        "notification_enabled": true
+    },
+    "advanced": {
+        "read_attempts": 3,
+        "read_timeout": 30,
+        "backup_enabled": true,
+        "backup_dir": "./backups"
+    }
+}
