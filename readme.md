@@ -1,5 +1,4 @@
-> Not tested, this is a new version
-
+## I would love for people to help out and contribute on this project. Pull requests are accepted.
 ---
 
 NFCman lets you manipulate NFC cards and signals directly from your phone. With this tool, you can:
