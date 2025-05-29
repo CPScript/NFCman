@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fixed?
+# Updated NFCman Manager - Android Native Version. This gets rid of all Python/nfcpy dependencies and make the system work purely through Android NFC APIs instead. Fixed?
 
 LOG_FILE="nfc_clone.log"
 ANDROID_DATA_DIR="/storage/emulated/0/Android/data/com.nfcclone.app/files"
@@ -35,19 +35,20 @@ check_nfc_enabled() {
 }
 
 read_card() {
-    log "[*] Starting NFC card reading..."
+    log "[*] Starting NFC card reading through Android app..."
     
     if ! check_android_app || ! check_nfc_enabled; then
         return 1
     fi
     
-    # Start the NFC reader activity
-    log "[*] Starting NFC reader application..."
+    log "[*] Launching NFC reader application..."
     am start -n "$PACKAGE_NAME/.NFCReaderActivity" --activity-clear-top
     
     if [ $? -eq 0 ]; then
-        log "[+] NFC reader started. Follow on-screen instructions."
-        termux-notification --title "NFC Reader Active" --content "Place card on device to read"
+        log "[+] NFC reader started. Use the Android app to read cards."
+        termux-notification --title "NFC Reader Active" --content "Use the NFC Clone app to read cards"
+        log "[*] Cards will be saved automatically to $CARDS_DIR"
+        log "[*] Return to this menu after reading cards"
     else
         log "[!] Failed to start NFC reader"
         return 1
@@ -98,7 +99,6 @@ emulate_card() {
         return 1
     fi
     
-    # Create emulation config
     local config_file="$ANDROID_DATA_DIR/emulation_config.json"
     cat > "$config_file" << EOF
 {
@@ -109,7 +109,6 @@ emulate_card() {
 }
 EOF
     
-    # Start emulation service
     am startservice -n "$PACKAGE_NAME/.NfcEmulatorService" \
         --es "action" "start_emulation" \
         --es "card_uid" "$card_uid"
@@ -123,7 +122,6 @@ EOF
         echo "[*] Card emulation active. Press Ctrl+C to stop."
         trap 'stop_emulation' INT TERM
         
-        # Keep script running
         while true; do
             sleep 1
             if [ ! -f "$config_file" ]; then
@@ -238,19 +236,16 @@ analyze_card() {
     echo "Read Date: $date"
     echo
     
-    # Show all technologies
     echo "Supported Technologies:"
     jq -r '.Technologies[]? // empty' "$card_file" | sed 's/.*\./  - /'
     echo
     
-    # Show NDEF data if present
     if jq -e '.NDEF' "$card_file" >/dev/null 2>&1; then
         echo "NDEF Data:"
         jq -r '.NDEF | to_entries[] | "  \(.key): \(.value)"' "$card_file"
         echo
     fi
     
-    # Show MIFARE data if present
     if jq -e '.MIFARE' "$card_file" >/dev/null 2>&1; then
         echo "MIFARE Information:"
         local sector_count=$(jq -r '.MIFARE.SectorCount // "Unknown"' "$card_file")
@@ -264,7 +259,6 @@ analyze_card() {
         echo
     fi
     
-    # Show ISO-DEP data if present
     if jq -e '.ISO_DEP' "$card_file" >/dev/null 2>&1; then
         echo "ISO-DEP Information:"
         jq -r '.ISO_DEP | to_entries[] | select(.key != "AID_Responses") | "  \(.key): \(.value)"' "$card_file"
@@ -305,7 +299,6 @@ export_card() {
         export_name="card_${card_uid}_export.json"
     fi
     
-    # Create export with metadata
     jq --arg export_time "$(date -Iseconds)" '{
         export_info: {
             exported_at: $export_time,
@@ -327,13 +320,10 @@ import_card() {
         return 1
     fi
     
-    # Check if it's an export format or direct card format
     if jq -e '.card_data' "$import_file" >/dev/null 2>&1; then
-        # Export format
         local uid=$(jq -r '.card_data.UID' "$import_file")
         jq '.card_data' "$import_file" > "$CARDS_DIR/card_${uid}.json"
     else
-        # Direct card format
         local uid=$(jq -r '.UID' "$import_file")
         cp "$import_file" "$CARDS_DIR/card_${uid}.json"
     fi
@@ -374,7 +364,7 @@ show_menu() {
     echo "════════════════════════════════════════════════════════════════"
     echo "║                          NFCman                              ║"
     echo "════════════════════════════════════════════════════════════════"
-    echo "║  1. Read NFC Card          │  5. Analyze Card                ║"
+    echo "║  1. Launch NFC Reader App  │  5. Analyze Card                ║"
     echo "║  2. List Saved Cards       │  6. Export Card                 ║"
     echo "║  3. Emulate NFC Card       │  7. Import Card                 ║"
     echo "║  4. Modify Card Data       │  8. Delete Card                 ║"
@@ -385,7 +375,6 @@ show_menu() {
 }
 
 main() {
-    # Initial setup
     if ! check_android_app; then
         echo "Install the Android NFC Clone app first, then run this script."
         exit 1
