@@ -1,521 +1,102 @@
 ## I would love for people to help out and contribute on this project. Pull requests are accepted.
 ---
 
-NFCman lets you manipulate NFC cards and signals directly from your phone. With this tool, you can:
-- Read and extract data from NFC cards
-- Save card data for later use
-- Emulate cards to unlock doors, access control systems, and other NFC readers
-- Analyze card structures including MIFARE sectors
-- Customize card responses for specialized systems
-
-## Requirements
-
-- Android device with NFC capability
-- Termux installed
-- Android 4.4+ (KitKat) for HCE support
-- Python with nfcpy library
-
-## Installation
-
-1. Install Termux from Google Play or F-Droid
-
-2. Open Termux and install required packages:
-```bash
-pkg update && pkg upgrade -y
-pkg install git python termux-api jq -y
-pip install nfcpy
-```
-
-3. Clone the repository:
-```bash
-git clone https://github.com/CPScript/NFCman.git
-cd NFCman
-```
-
-4. Run the installer:
-```bash
-chmod +x install.sh
-./install.sh
-```
-
-5. Install the Android component:
-   - The installer will attempt to build and install the app
-   - If that fails, you'll need to manually build and install the APK
-
-## Project Structure
-
-```
-NFCman/
-├── android/                # Android HCE app files
-│   ├── AndroidManifest.xml # App configuration
-│   ├── NfcEmulatorService.java # Card emulation service
-│   └── res/xml/apduservice.xml # NFC service config
-├── config.json            # Framework configuration
-├── install.sh             # Installation script
-├── nfc_manager.sh         # Main interface script
-└── scripts/               # Utility scripts
-    ├── read_card.py       # Card reading script
-    ├── emulate_card.sh    # Card emulation script
-    ├── utils.py           # Python utilities
-    └── card_utils.sh      # Bash utilities
-```
-
-## Tutorial
-
-### 1. Reading an NFC Card
-
-1. Start the NFC manager:
-```bash
-./nfc_manager.sh
-```
-
-2. Select option `1` (Read NFC Card) from the menu.
-
-3. When prompted, place your NFC card on your device's NFC sensor:
-```
-[*] Place card on reader...
-```
-
-4. The framework will read the card and save its data:
-```
-[+] Card saved: 0A1B2C3D
-[+] File: ./cards/card_0A1B2C3D.json
-```
-
-The card data is saved as a JSON file containing:
-- Card UID
-- Card type
-- NDEF data (if available)
-- MIFARE sector data (if it's a MIFARE card)
-- Raw dumps for advanced analysis
-
-### 2. Understanding the Card Data
-
-The `read_card.py` script extracts several important elements from cards:
-
-```python
-tag_info = {
-    "UID": uid,                    # Unique identifier
-    "Type": str(tag),              # Card type (MIFARE, NTAG, etc.)
-    "Technologies": [...],         # Supported technologies
-    "Timestamp": int(time.time()), # When the card was read
-}
-```
-
-For MIFARE cards, it also extracts sector data:
-```python
-if hasattr(tag, 'mifare'):
-    sectors_data = {}
-    for sector in range(16):
-        try:
-            blocks = tag.mifare.read_blocks(sector * 4, 4)
-            sectors_data[f"sector_{sector}"] = binascii.hexlify(blocks).decode()
-        except Exception as e:
-            sectors_data[f"sector_{sector}"] = f"Error: {str(e)}"
-    tag_info["MIFARE_Data"] = sectors_data
-```
-
-### 3. Listing Saved Cards
-
-1. From the main menu, select option `2` (List Saved Cards).
-
-2. You'll see a table of all saved cards:
-```
-[*] Saved cards:
-----------------------------------------
-| UID                | Type            |
-----------------------------------------
-| 0A1B2C3D           | MIFARE Classic  |
-| E5F6G7H8           | NTAG215         |
-----------------------------------------
-```
-
-The `list_saved_cards()` function in `card_utils.sh` handles this:
-```bash
-function list_saved_cards() {
-    load_config
-    
-    echo "[*] Saved cards:"
-    echo "----------------------------------------"
-    echo "| UID                | Type            |"
-    echo "----------------------------------------"
-    
-    find "$CARD_DATA_DIR" -name "card_*.json" | while read -r card_file; do
-        if [ -f "$card_file" ]; then
-            local uid=$(jq -r '.UID // "Unknown"' "$card_file")
-            local type=$(jq -r '.Type // "Unknown"' "$card_file")
-            local type_short=${type:0:15}
-            printf "| %-18s | %-15s |\n" "$uid" "$type_short"
-        fi
-    done
-    echo "----------------------------------------"
-}
-```
-
-### 4. Analyzing a Card
-
-1. From the main menu, select option `5` (Analyze Card).
-
-2. Enter the UID of the card to analyze.
-
-3. View the detailed analysis:
-```
-[*] Card Analysis: 0A1B2C3D
---------------------------------------------------
-Type: MIFARE Classic 1K
-
-Supported Technologies:
-- mifare
-- ndef
-
-MIFARE Sectors:
-sector_0: 0A1B2C3D10480804...
-sector_1: 00000000000000...
-...
-```
-
-The analysis is handled by the `analyze_card()` function in `utils.py`:
-```python
-def analyze_card(uid):
-    """Analyze a saved card and print detailed information"""
-    card_path = get_card_path(uid)
-    
-    if not os.path.exists(card_path):
-        print(f"[!] Card not found: {uid}")
-        return False
-    
-    try:
-        with open(card_path, 'r') as f:
-            card_data = json.load(f)
-        
-        print(f"\n[*] Card Analysis: {uid}")
-        print("-" * 50)
-        print(f"Type: {card_data.get('Type', 'Unknown')}")
-        
-        # More analysis code here...
-    
-    except Exception as e:
-        print(f"[!] Error analyzing card: {str(e)}")
-        return False
-```
-
-### 5. Emulating a Card
-
-1. From the main menu, select option `3` (Emulate NFC Card).
-
-2. Enter the UID of the card you want to emulate:
-```
-[?] Enter card UID to emulate: 0A1B2C3D
-```
-
-3. The emulation service will start:
-```
-[*] Preparing to emulate card: 0A1B2C3D
-[*] Card file: ./cards/card_0A1B2C3D.json
-[+] NFC emulation service started
-```
-
-The emulation process:
-1. The `emulate_card.sh` script loads the card data
-2. It prepares a JSON settings file with the card details
-3. This is passed to the Android HCE component 
-4. The Android app handles the actual emulation
-
-Key code from `emulate_card.sh`:
-```bash
-# Create a temporary JSON settings file for the Android app
-TEMP_SETTINGS=$(mktemp)
-cat > "$TEMP_SETTINGS" << EOF
-{
-    "uid": "$CARD_UID",
-    "card_path": "$CARD_FILE",
-    "auto_response": true
-}
-EOF
-
-# Copy settings to a location accessible by the app
-ANDROID_STORAGE_PATH="/storage/emulated/0/Android/data/com.nfcclone.app/files"
-mkdir -p "$ANDROID_STORAGE_PATH"
-cp "$TEMP_SETTINGS" "$ANDROID_STORAGE_PATH/current_card.json"
-
-# Start the NFC Emulator app
-am start -n com.nfcclone.app/.MainActivity --ez "start_emulation" true
-```
-
-The core emulation occurs in `NfcEmulatorService.java`:
-```java
-@Override
-public byte[] processCommandApdu(byte[] commandApdu, Bundle extras) {
-    Log.d(TAG, "Received APDU: " + bytesToHex(commandApdu));
-    
-    // If no card is loaded, return failure
-    if (emulatedUid == null) {
-        Log.e(TAG, "No card data loaded for emulation");
-        return FAILURE_SW;
-    }
-    
-    // Process SELECT command
-    if (Arrays.equals(SELECT_AID_COMMAND, commandApdu) || 
-        (commandApdu.length >= 5 && commandApdu[0] == (byte)0x00 && commandApdu[1] == (byte)0xA4)) {
-        Log.d(TAG, "Received SELECT command, responding with success");
-        return SUCCESS_SW;
-    }
-    
-    // Process GET UID command
-    if (commandApdu.length >= 2 && commandApdu[0] == (byte)0xFF && commandApdu[1] == (byte)0xCA) {
-        Log.d(TAG, "Received GET UID command, responding with UID");
-        byte[] response = new byte[emulatedUid.length + 2];
-        System.arraycopy(emulatedUid, 0, response, 0, emulatedUid.length);
-        System.arraycopy(SUCCESS_SW, 0, response, emulatedUid.length, 2);
-        return response;
-    }
-    
-    // Use custom response if available
-    if (customResponse != null) {
-        return customResponse;
-    }
-    
-    // Default response
-    return SUCCESS_SW;
-}
-```
-
-4. Place your phone against the NFC reader to test the emulation.
-
-5. Press Ctrl+C to stop emulation when finished.
-
-### 6. Modifying Card Data
-
-1. From the main menu, select option `4` (Modify Card Data).
-
-2. Enter the UID of the card to modify.
-
-3. Choose a modification option:
-   - Edit custom response: Change how the card responds to commands
-   - Add label: Add a name to identify the card
-   - Edit raw data: Directly edit the JSON card file
-
-The custom response option is particularly useful if the original reader expects specific responses:
-```bash
-echo -n "[?] Enter new custom response (hex, e.g. 9000): "
-read -r new_response
-jq ".custom_response = \"$new_response\"" "$card_file" > "${card_file}.tmp" && mv "${card_file}.tmp" "$card_file"
-```
-
-### 7. Exporting and Importing Cards
-
-1. From the main menu, select option `6` (Export/Import Card).
-
-2. To export a card (to share with others or backup):
-   - Select `1` (Export Card)
-   - Enter the card UID
-   - The card will be exported to a portable JSON format
-
-3. To import a card:
-   - Select `2` (Import Card)
-   - Enter the path to the import file
-   - The card will be added to your collection
-
-## Advanced Usage
-
-### Custom Card Responses for Specific Systems
-
-Some access systems check for specific responses. You can customize these:
-
-1. Log the responses from your original card using an NFC analyzer app
-2. Use the "Edit custom response" option to set the same response
-3. Test with the target system
-
-### Handling Encrypted Cards
-
-For encrypted cards (like secure MIFARE DESFire):
-
-1. Reading will get the UID, which is often enough for basic emulation
-2. Some systems check only the UID, not the encrypted content
-3. If the system verifies cryptographic authentication, you'll need to use more advanced tools
-
-### Working with Different Card Types
-
-Different card types are handled in `read_card.py`:
-
-- MIFARE Classic: Tries to read all sectors
-- NDEF cards: Extracts NDEF records and text
-- Other cards: Gets basic identification info
-
-The Android emulation component handles various card protocols in the HCE service.
-
-## Troubleshooting
-
-### Card Reading Problems
-
-- **Card not detected**: Check NFC is enabled in phone settings
-- **Read errors**: Some cards use encryption or proprietary protocols
-- **Incomplete data**: Some sectors may be protected, but the UID is always readable
-
-### Emulation Issues
-
-- **Emulation not working**: Verify Android HCE app installed correctly
-- **Reader rejects emulated card**: Modern systems may detect emulation
-- **Inconsistent results**: Try adjusting how you position the phone
-
-### NFC Compatibility
-
-- This framework works best with:
-  - MIFARE Classic 1K/4K
-  - NTAG21x series
-  - ISO 14443-A cards
-- Limited support for:
-  - MIFARE DESFire
-  - FeliCa
-  - ISO 14443-B
-
-## Advanced Setup: Rooting and Alternatives
-
-### Rooting Your Android Device
-
-Rooting provides additional capabilities for NFC manipulation, including direct memory access to the NFC controller and bypassing Android security restrictions. With root access, you can:
-
-- Clone a wider range of NFC cards including some secured types
-- Directly manipulate the NFC hardware at a lower level
-- Use advanced emulation features not available through standard HCE
-
-> ⚠️ **WARNING**: Rooting voids warranty, may trigger security measures, and could potentially brick your device if done incorrectly. Proceed at your own risk.
-
-#### General Rooting Methods
-
-Every Android device has a different rooting procedure. Here's a general approach:
-
-1. **Preparation**:
-   ```bash
-   # Enable Developer Options:
-   Settings > About Phone > Tap "Build Number" 7 times
-   
-   # Enable USB Debugging and OEM Unlocking:
-   Settings > Developer Options > Enable both options
-   
-   # Install required tools on your computer:
-   # ADB and Fastboot tools from Android SDK Platform Tools
-   ```
-
-2. **Unlock Bootloader**:
-   ```bash
-   # Connect phone to computer via USB
-   adb devices                    # Verify connection
-   adb reboot bootloader          # Reboot to bootloader
-   
-   # Unlock bootloader (exact command varies by manufacturer)
-   fastboot flashing unlock       # For newer devices
-   # OR
-   fastboot oem unlock            # For older devices
-   ```
-
-3. **Install Custom Recovery**:
-   ```bash
-   # Download TWRP for your specific device from twrp.me
-   fastboot flash recovery twrp-[your-device]-[version].img
-   fastboot reboot recovery
-   ```
-
-4. **Install Magisk**:
-   - Download latest Magisk APK from [GitHub](https://github.com/topjohnwu/Magisk/releases)
-   - Rename it to Magisk.zip
-   - Transfer to your device
-   - In TWRP, select "Install" and choose the Magisk.zip file
-   - Reboot system
-
-#### Device-Specific Guides
-
-For model-specific instructions, search:
-- XDA Developers forums for your device model
-- Manufacturer-specific methods:
-  - Samsung: Use Odin with patched AP files
-  - Pixel: Special fastboot commands
-  - Xiaomi: Request unlock permission through Mi Unlock tool
-  - OnePlus: Relatively straightforward bootloader unlock
-
-#### Verifying Root for NFCman:
-
-```bash
-# In Termux:
-pkg install root-repo
-pkg install tsu
-tsu                       # Should give you a # prompt if root works
-whoami                    # Should display "root"
-
-# Check NFC hardware access
-ls -la /dev/nfc*          # Should show NFC device files
-```
-
-### Alternative: Using Termux with X11 Environment
-
-If you can't or don't want to root your device, you can set up a graphical environment in Termux to use additional NFC tools through a GUI interface:
-
-1. **Install Required Packages**:
-   ```bash
-   pkg update && pkg upgrade
-   pkg install x11-repo
-   pkg install xorg-server tigervnc xfce4 aterm
-   ```
-
-2. **Configure VNC Server**:
-   ```bash
-   vncserver -localhost    # Start VNC server
-   # Set a password when prompted
-   
-   # Create startup file
-   mkdir -p ~/.vnc
-   cat > ~/.vnc/xstartup << 'EOF'
-   #!/data/data/com.termux/files/usr/bin/bash
-   xrdb $HOME/.Xresources
-   xfce4-session &
-   EOF
-   
-   chmod +x ~/.vnc/xstartup
-   ```
-
-3. **Kill existing server and restart properly**:
-   ```bash
-   vncserver -kill :1
-   vncserver -geometry 1280x720 -localhost :1
-   ```
-
-4. **Install VNC Viewer**:
-   - Install a VNC client app from Google Play (like VNC Viewer by RealVNC)
-   - Configure connection to: localhost:5901
-   - Enter the password you set earlier
-
-5. **Install and Run NFC Tools in X11**:
-   ```bash
-   # In your VNC X11 session terminal
-   pkg install python-tkinter
-   
-   # Install graphical NFC tools
-   pip install nfcpy-gui
-   
-   # Create a launcher script for the NFC GUI tool
-   cat > ~/nfc-gui.sh << 'EOF'
-   #!/data/data/com.termux/files/usr/bin/bash
-   cd $HOME
-   python -c "import nfcpy_gui; nfcpy_gui.main()"
-   EOF
-   
-   chmod +x ~/nfc-gui.sh
-   ```
-
-6. **Run the GUI Tool**:
-   - From the X11 desktop, open a terminal
-   - Execute `~/nfc-gui.sh`
-   - The graphical NFC tool will allow you to scan and analyze cards
-
-This X11 setup provides a desktop-like environment for working with NFC tools that have graphical interfaces, offering an alternative approach for users who prefer visual tools or cannot root their devices.
-
-## Security Considerations
-
-- Only clone cards you own or have permission to clone
-- Be aware that bypassing access control may violate terms of service or laws
-- This tool is for educational and personal use
-- Cards containing financial data (credit cards, etc.) use strong encryption and cannot be cloned with this tool
-
-## Legal Disclaimer
-
-This framework is provided for educational purposes only. Use at your own risk and responsibility. The developers are not responsible for any misuse.
+# NFCman - Android NFC Card Management Framework
+
+**⚠️ IMPORTANT NOTICE: This software has undergone significant architectural changes and has not been tested in real-world environments. Use with extreme caution and at your own risk. The developers assume no responsibility for any consequences resulting from the use of this software.**
+
+## Overview
+
+NFCman is an Android-based framework designed for Near Field Communication (NFC) card analysis, management, and emulation. The system enables users to read NFC cards, analyze their structure and data, store card information for later use, and emulate cards through Android's Host Card Emulation (HCE) technology. The framework operates through a combination of a Termux-based command-line interface and a dedicated Android application.
+
+## Recent Architectural Changes
+
+This version represents a complete redesign of the original NFCman framework. The previous iteration attempted to use desktop Linux NFC libraries (nfcpy) within the Android environment, which created fundamental compatibility issues that prevented proper operation. The current version has been restructured to eliminate these incompatibilities.
+
+### Key Changes Implemented
+
+The system has been converted from a hybrid desktop-mobile architecture to a pure Android implementation. All Python-based card reading functionality that relied on the nfcpy library has been removed and replaced with direct integration to Android NFC APIs through the Java-based Android application component. The Termux interface now serves as a management layer that coordinates with the Android application rather than attempting direct NFC hardware access.
+
+The card reading process now operates entirely through the Android NFCReaderActivity, which utilizes standard Android NFC APIs to interact with cards across multiple technologies including MIFARE Classic, MIFARE Ultralight, NTAG series, ISO14443-4, and FeliCa. Card emulation functionality continues to leverage Android's Host Card Emulation framework through the NfcEmulatorService.
+
+## System Requirements
+
+The framework requires an Android device with NFC capability running Android 4.4 (KitKat) or later to support Host Card Emulation features. The Termux application must be installed and configured with storage permissions. The custom Android NFC Clone application must be built and installed separately, as it handles all direct NFC operations.
+
+## Installation Process
+
+Begin by installing Termux from either Google Play Store or F-Droid. Open Termux and update the package repository, then install the required dependencies including git, jq, termux-api, and android-tools. Clone the NFCman repository and execute the installation script, which will configure the necessary directory structure and generate configuration files.
+
+The Android application component requires separate compilation and installation. The installation script generates the necessary Android project structure, but the application must be built using Android Studio or a compatible development environment. Once built, install the resulting APK file on your device.
+
+Grant the necessary permissions including NFC access, storage permissions for Termux, and any permissions requested by the NFC Clone application. Ensure that NFC is enabled in your device settings before attempting to use the framework.
+
+## Operational Workflow
+
+### Card Reading Operations
+
+Launch the NFCman management script through Termux, which presents a menu-driven interface for all operations. Select the card reading option, which will launch the Android NFC Clone application. Within the application, position the target NFC card against your device's NFC sensor. The application will automatically detect the card, extract available data including UID, technology information, NDEF records, and sector data where accessible, then save the information as a JSON file in the designated storage directory.
+
+### Card Analysis and Management
+
+The framework provides comprehensive analysis tools for examining saved card data. Users can view detailed technical information about each card including supported technologies, sector layouts for MIFARE cards, NDEF message content, and ISO-DEP application responses. The system supports card labeling, custom response configuration, and data export for sharing or backup purposes.
+
+### Card Emulation Process
+
+To emulate a previously read card, select the emulation option from the management interface and specify the UID of the target card. The system will configure the Android HCE service with the stored card data and activate emulation mode. During emulation, your device will respond to NFC readers with the stored card information, effectively presenting itself as the original card.
+
+## Technical Architecture
+
+### Android Application Component
+
+The NFCReaderActivity implements comprehensive NFC card reading capabilities using Android's standard NFC APIs. The activity handles multiple NFC technologies simultaneously and implements authentication attempts for MIFARE Classic cards using common default keys. The NfcEmulatorService provides Host Card Emulation functionality by processing APDU commands and responding with stored card data or configured custom responses.
+
+### Data Storage and Management
+
+Card information is stored in JSON format within the Android application's private storage directory. Each card file contains the complete extracted data structure including technology information, raw data dumps, and user-configured parameters such as custom responses and labels. The storage format enables both human readability and programmatic access for analysis tools.
+
+### Integration Layer
+
+The Termux-based management interface coordinates with the Android application through Android's Intent system and shared storage mechanisms. Configuration files enable communication between the command-line tools and the Android services, while Android's notification system provides status updates during operations.
+
+## Security and Legal Considerations
+
+This framework is intended for educational and research purposes involving NFC technology. Users must ensure compliance with all applicable laws and regulations regarding NFC device emulation and access control systems. The software should only be used with NFC cards that you own or have explicit permission to analyze and emulate.
+
+Many modern access control systems implement security measures designed to detect emulation attempts. Payment cards and other high-security applications utilize cryptographic protocols that cannot be successfully emulated through this framework. The system is most effective with basic access cards and identification tags that rely primarily on UID-based authentication.
+
+## Important Limitations and Warnings
+
+### Testing Status
+
+This version of NFCman represents a significant architectural redesign that has not undergone comprehensive testing in real-world environments. The integration between Termux components and the Android application may exhibit unexpected behaviors or compatibility issues with specific device configurations or Android versions.
+
+### Hardware Compatibility
+
+NFC implementation varies significantly across Android devices and manufacturers. The framework may not function correctly on all devices, even those that officially support NFC and HCE. Some devices may have restrictions or modifications to the NFC subsystem that prevent proper operation.
+
+### Emulation Limitations
+
+Host Card Emulation operates within the constraints of Android's security model and may not successfully emulate all card types or respond to all reader implementations. Modern access control systems often implement additional security measures that can detect emulation attempts.
+
+## Troubleshooting Common Issues
+
+If card reading operations fail, verify that NFC is enabled in device settings and that the NFC Clone application has been granted all necessary permissions. Ensure that cards are positioned correctly against the device's NFC antenna, which location varies by device model.
+
+For emulation problems, confirm that the Android HCE service is properly registered and that the target reader system is compatible with HCE-based emulation. Some readers may require specific timing or response characteristics that differ from the framework's default configuration.
+
+If the Termux interface cannot communicate with the Android application, verify that both components have appropriate storage permissions and that the shared directory structure has been created correctly.
+
+## Development and Contribution
+
+The framework consists of multiple components requiring different development approaches. The Android application component requires Android development tools and knowledge of NFC APIs, while the Termux interface utilizes standard shell scripting and JSON processing tools.
+
+Contributors should focus on testing the framework across different device types and Android versions to identify compatibility issues and edge cases. Additional card type support, improved authentication mechanisms for MIFARE cards, and enhanced analysis tools represent areas for potential improvement.
+
+## Disclaimer and Risk Assessment
+
+This software is provided without warranty of any kind, either express or implied. The developers disclaim all liability for any direct, indirect, incidental, or consequential damages resulting from the use or inability to use this software. Users assume full responsibility for compliance with applicable laws and regulations.
+
+The untested nature of this architectural revision introduces additional risks beyond those inherent in NFC manipulation tools. Unexpected behaviors could potentially damage NFC cards, interfere with legitimate access control systems, or cause device instability. Users should thoroughly test the framework in controlled environments before relying on it for any critical applications.
+
+Given the experimental status of this version, users are strongly advised to maintain backups of any important card data and to avoid using the framework in production environments or situations where failure could result in significant inconvenience or security implications.
