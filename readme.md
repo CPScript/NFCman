@@ -5,6 +5,9 @@
 
 **⚠️ IMPORTANT NOTICE: This software has undergone significant architectural changes and has not been tested in real-world environments. Use with extreme caution and at your own risk. The developers assume no responsibility for any consequences resulting from the use of this software.**
 
+> The NFCReaderActivity demonstrates sophisticated MIFARE Classic reading capabilities, successfully extracting sector data, authentication keys, and protocol-specific information. However, the NfcEmulatorService cannot reproduce this functionality during emulation because it operates through Android's software-based HCE system rather than direct hardware manipulation.
+This disconnect means users can analyze MIFARE Classic cards comprehensively but cannot successfully emulate them when presented to readers expecting genuine MIFARE Classic protocol responses. The emulation will fail at the protocol level, regardless of how accurately the stored data matches the original card.
+
 ## Overview
 
 NFCman is an Android-based framework designed for Near Field Communication (NFC) card analysis, management, and emulation. The system enables users to read NFC cards, analyze their structure and data, store card information for later use, and emulate cards through Android's Host Card Emulation (HCE) technology. The framework operates through a combination of a Termux-based command-line interface and a dedicated Android application.
