@@ -1,124 +1,203 @@
 #!/bin/bash
-# Main NFC Manager Script
+# Fixed?
 
-# Import utility functions
-source ./scripts/card_utils.sh
-
-# Configure paths and logging
 LOG_FILE="nfc_clone.log"
-touch "$LOG_FILE"
+ANDROID_DATA_DIR="/storage/emulated/0/Android/data/com.nfcclone.app/files"
+CARDS_DIR="$ANDROID_DATA_DIR/cards"
+PACKAGE_NAME="com.nfcclone.app"
 
-# Log function
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
-    echo "$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-# Check for required tools
-check_dependencies() {
-    local missing_deps=0
-    
-    # Required packages
-    for cmd in python jq termux-notification am; do
-        if ! command -v "$cmd" &> /dev/null; then
-            log "[!] Missing dependency: $cmd"
-            missing_deps=1
-        fi
-    done
-    
-    # Check for Python libraries
-    if ! python3 -c "import nfc" &> /dev/null; then
-        log "[!] Missing Python library: nfcpy"
-        log "[!] Install with: pip install nfcpy"
-        missing_deps=1
+check_android_app() {
+    if ! pm list packages | grep -q "$PACKAGE_NAME"; then
+        log "[!] NFC Clone app not installed"
+        log "[!] Please install the APK first"
+        return 1
     fi
     
-    if [ $missing_deps -eq 1 ]; then
-        log "[!] Run ./install.sh to install dependencies"
-        return 1
+    if [ ! -d "$ANDROID_DATA_DIR" ]; then
+        mkdir -p "$ANDROID_DATA_DIR"
+        mkdir -p "$CARDS_DIR"
     fi
     
     return 0
 }
 
-# Read a new card
+check_nfc_enabled() {
+    local nfc_status=$(settings get secure nfc_enabled 2>/dev/null)
+    if [ "$nfc_status" != "1" ]; then
+        log "[!] NFC is disabled. Enable in Settings > Connected devices > NFC"
+        return 1
+    fi
+    return 0
+}
+
 read_card() {
-    log "[*] Reading NFC card..."
-    python3 ./scripts/read_card.py
+    log "[*] Starting NFC card reading..."
+    
+    if ! check_android_app || ! check_nfc_enabled; then
+        return 1
+    fi
+    
+    # Start the NFC reader activity
+    log "[*] Starting NFC reader application..."
+    am start -n "$PACKAGE_NAME/.NFCReaderActivity" --activity-clear-top
+    
     if [ $? -eq 0 ]; then
-        log "[+] Card read successfully"
+        log "[+] NFC reader started. Follow on-screen instructions."
+        termux-notification --title "NFC Reader Active" --content "Place card on device to read"
     else
-        log "[!] Failed to read card"
+        log "[!] Failed to start NFC reader"
+        return 1
     fi
 }
 
-# Emulate a card
-emulate_card() {
-    log "[*] Emulate NFC card..."
-    list_saved_cards
+list_saved_cards() {
+    if [ ! -d "$CARDS_DIR" ]; then
+        log "[!] No cards directory found"
+        return 1
+    fi
     
+    log "[*] Saved cards:"
+    echo "----------------------------------------"
+    printf "| %-18s | %-15s |\n" "UID" "Type"
+    echo "----------------------------------------"
+    
+    for card_file in "$CARDS_DIR"/card_*.json; do
+        if [ -f "$card_file" ]; then
+            local uid=$(jq -r '.UID // "Unknown"' "$card_file" 2>/dev/null)
+            local type=$(jq -r '.Technologies[0] // "Unknown"' "$card_file" 2>/dev/null | sed 's/.*\.//')
+            printf "| %-18s | %-15s |\n" "$uid" "${type:0:15}"
+        fi
+    done
+    echo "----------------------------------------"
+}
+
+emulate_card() {
+    log "[*] Starting card emulation..."
+    
+    if ! check_android_app || ! check_nfc_enabled; then
+        return 1
+    fi
+    
+    list_saved_cards
+    echo
     echo -n "[?] Enter card UID to emulate: "
     read -r card_uid
     
     if [ -z "$card_uid" ]; then
-        log "[!] No card UID provided"
+        log "[!] No UID provided"
         return 1
     fi
     
-    # Start emulation in a new process
-    ./scripts/emulate_card.sh "$card_uid"
-}
-
-# Modify card data
-modify_card() {
-    list_saved_cards
-    
-    echo -n "[?] Enter card UID to modify: "
-    read -r card_uid
-    
-    if [ -z "$card_uid" ]; then
-        log "[!] No card UID provided"
-        return 1
-    fi
-    
-    card_file=$(get_card_path "$card_uid")
-    
+    local card_file="$CARDS_DIR/card_${card_uid}.json"
     if [ ! -f "$card_file" ]; then
         log "[!] Card not found: $card_uid"
         return 1
     fi
     
-    # Show modification options
-    echo "[*] Modification options:"
-    echo "  1. Edit custom response"
-    echo "  2. Add label/name"
-    echo "  3. Edit raw data"
-    echo "  4. Back to main menu"
+    # Create emulation config
+    local config_file="$ANDROID_DATA_DIR/emulation_config.json"
+    cat > "$config_file" << EOF
+{
+    "active": true,
+    "card_uid": "$card_uid",
+    "card_file": "$card_file",
+    "timestamp": $(date +%s)
+}
+EOF
     
+    # Start emulation service
+    am startservice -n "$PACKAGE_NAME/.NfcEmulatorService" \
+        --es "action" "start_emulation" \
+        --es "card_uid" "$card_uid"
+    
+    if [ $? -eq 0 ]; then
+        log "[+] Emulation started for card: $card_uid"
+        termux-notification --title "NFC Emulation Active" \
+                           --content "Emulating: $card_uid" \
+                           --priority high --ongoing
+        
+        echo "[*] Card emulation active. Press Ctrl+C to stop."
+        trap 'stop_emulation' INT TERM
+        
+        # Keep script running
+        while true; do
+            sleep 1
+            if [ ! -f "$config_file" ]; then
+                break
+            fi
+        done
+    else
+        log "[!] Failed to start emulation"
+        return 1
+    fi
+}
+
+stop_emulation() {
+    log "[*] Stopping emulation..."
+    
+    local config_file="$ANDROID_DATA_DIR/emulation_config.json"
+    rm -f "$config_file"
+    
+    am broadcast -a "$PACKAGE_NAME.STOP_EMULATION"
+    termux-notification-remove nfc_emulation
+    
+    log "[+] Emulation stopped"
+    exit 0
+}
+
+modify_card() {
+    list_saved_cards
+    echo
+    echo -n "[?] Enter card UID to modify: "
+    read -r card_uid
+    
+    if [ -z "$card_uid" ]; then
+        log "[!] No UID provided"
+        return 1
+    fi
+    
+    local card_file="$CARDS_DIR/card_${card_uid}.json"
+    if [ ! -f "$card_file" ]; then
+        log "[!] Card not found: $card_uid"
+        return 1
+    fi
+    
+    echo
+    echo "Modification options:"
+    echo "1. Set custom response"
+    echo "2. Add/edit label"
+    echo "3. Edit raw JSON"
+    echo "4. Back to main menu"
+    echo
     echo -n "[?] Choose option: "
     read -r option
     
     case $option in
         1)
-            echo -n "[?] Enter new custom response (hex, e.g. 9000): "
-            read -r new_response
-            jq ".custom_response = \"$new_response\"" "$card_file" > "${card_file}.tmp" && mv "${card_file}.tmp" "$card_file"
-            log "[+] Custom response updated"
+            echo -n "[?] Enter custom response (hex, e.g., 9000): "
+            read -r response
+            if [ -n "$response" ]; then
+                jq --arg resp "$response" '.custom_response = $resp' "$card_file" > "${card_file}.tmp" &&
+                mv "${card_file}.tmp" "$card_file"
+                log "[+] Custom response updated"
+            fi
             ;;
         2)
-            echo -n "[?] Enter label for this card: "
+            echo -n "[?] Enter label for card: "
             read -r label
-            jq ".label = \"$label\"" "$card_file" > "${card_file}.tmp" && mv "${card_file}.tmp" "$card_file"
-            log "[+] Card label updated"
+            if [ -n "$label" ]; then
+                jq --arg lbl "$label" '.label = $lbl' "$card_file" > "${card_file}.tmp" &&
+                mv "${card_file}.tmp" "$card_file"
+                log "[+] Label updated"
+            fi
             ;;
         3)
-            # Use your preferred editor
-            if [ -n "$EDITOR" ]; then
-                $EDITOR "$card_file"
-            else
-                nano "$card_file" 2>/dev/null || vi "$card_file"
-            fi
-            log "[+] Card data updated"
+            ${EDITOR:-nano} "$card_file"
+            log "[+] Card file edited"
             ;;
         4)
             return 0
@@ -129,108 +208,193 @@ modify_card() {
     esac
 }
 
-# Analyze a card
 analyze_card() {
     list_saved_cards
-    
+    echo
     echo -n "[?] Enter card UID to analyze: "
     read -r card_uid
     
     if [ -z "$card_uid" ]; then
-        log "[!] No card UID provided"
+        log "[!] No UID provided"
         return 1
     fi
     
-    python3 -c "from utils import analyze_card; analyze_card('$card_uid')"
-}
-
-# Main menu
-show_menu() {
-    echo ""
-    echo "════════════════════════════════════"
-    echo "║           MANAGER v1.0           ║"
-    echo "════════════════════════════════════"
-    echo "║ 1. Read NFC Card                ║"
-    echo "║ 2. List Saved Cards             ║"
-    echo "║ 3. Emulate NFC Card             ║"
-    echo "║ 4. Modify Card Data             ║"
-    echo "║ 5. Analyze Card                 ║"
-    echo "║ 6. Export/Import Card           ║"
-    echo "║ 7. Delete Card                  ║"
-    echo "║ 8. Exit                         ║"
-    echo "════════════════════════════════════"
-    echo -n "[?] Choose option: "
-}
-
-# Export/import menu
-export_import_menu() {
-    echo ""
-    echo "════════════════════════════════════"
-    echo "║       EXPORT/IMPORT MENU        ║"
-    echo "════════════════════════════════════"
-    echo "║ 1. Export Card                  ║"
-    echo "║ 2. Import Card                  ║"
-    echo "║ 3. Back to Main Menu            ║"
-    echo "════════════════════════════════════"
-    echo -n "[?] Choose option: "
+    local card_file="$CARDS_DIR/card_${card_uid}.json"
+    if [ ! -f "$card_file" ]; then
+        log "[!] Card not found: $card_uid"
+        return 1
+    fi
     
-    read -r option
-    case $option in
-        1)
-            list_saved_cards
-            echo -n "[?] Enter card UID to export: "
-            read -r card_uid
-            echo -n "[?] Enter output file name (or press Enter for default): "
-            read -r output_file
-            export_card "$card_uid" "$output_file"
-            ;;
-        2)
-            echo -n "[?] Enter import file path: "
-            read -r import_file
-            import_card "$import_file"
-            ;;
-        3)
-            return 0
-            ;;
-        *)
-            log "[!] Invalid option"
-            ;;
-    esac
+    echo
+    echo "═══════════════════════════════════════════════════════════════"
+    echo "                      CARD ANALYSIS: $card_uid"
+    echo "═══════════════════════════════════════════════════════════════"
+    
+    local type=$(jq -r '.Technologies[0] // "Unknown"' "$card_file" | sed 's/.*\.//')
+    local timestamp=$(jq -r '.Timestamp // 0' "$card_file")
+    local date=$(date -d "@$timestamp" 2>/dev/null || echo "Unknown")
+    
+    echo "Primary Technology: $type"
+    echo "Read Date: $date"
+    echo
+    
+    # Show all technologies
+    echo "Supported Technologies:"
+    jq -r '.Technologies[]? // empty' "$card_file" | sed 's/.*\./  - /'
+    echo
+    
+    # Show NDEF data if present
+    if jq -e '.NDEF' "$card_file" >/dev/null 2>&1; then
+        echo "NDEF Data:"
+        jq -r '.NDEF | to_entries[] | "  \(.key): \(.value)"' "$card_file"
+        echo
+    fi
+    
+    # Show MIFARE data if present
+    if jq -e '.MIFARE' "$card_file" >/dev/null 2>&1; then
+        echo "MIFARE Information:"
+        local sector_count=$(jq -r '.MIFARE.SectorCount // "Unknown"' "$card_file")
+        local block_count=$(jq -r '.MIFARE.BlockCount // "Unknown"' "$card_file")
+        echo "  Sectors: $sector_count"
+        echo "  Blocks: $block_count"
+        echo
+        
+        echo "Sector Data (first 32 bytes):"
+        jq -r '.MIFARE.Sectors | to_entries[] | "  \(.key): \(.value | if type == "array" then .[0][:64] + "..." else . end)"' "$card_file"
+        echo
+    fi
+    
+    # Show ISO-DEP data if present
+    if jq -e '.ISO_DEP' "$card_file" >/dev/null 2>&1; then
+        echo "ISO-DEP Information:"
+        jq -r '.ISO_DEP | to_entries[] | select(.key != "AID_Responses") | "  \(.key): \(.value)"' "$card_file"
+        
+        if jq -e '.ISO_DEP.AID_Responses' "$card_file" >/dev/null 2>&1; then
+            echo "  AID Responses:"
+            jq -r '.ISO_DEP.AID_Responses | to_entries[] | "    \(.key): \(.value[:20])..."' "$card_file"
+        fi
+        echo
+    fi
+    
+    echo "Custom Response: $(jq -r '.custom_response // "None"' "$card_file")"
+    echo "Label: $(jq -r '.label // "None"' "$card_file")"
+    echo "═══════════════════════════════════════════════════════════════"
 }
 
-# Delete card menu
-delete_card_menu() {
+export_card() {
     list_saved_cards
+    echo
+    echo -n "[?] Enter card UID to export: "
+    read -r card_uid
     
+    if [ -z "$card_uid" ]; then
+        log "[!] No UID provided"
+        return 1
+    fi
+    
+    local card_file="$CARDS_DIR/card_${card_uid}.json"
+    if [ ! -f "$card_file" ]; then
+        log "[!] Card not found: $card_uid"
+        return 1
+    fi
+    
+    echo -n "[?] Export filename (or press Enter for default): "
+    read -r export_name
+    
+    if [ -z "$export_name" ]; then
+        export_name="card_${card_uid}_export.json"
+    fi
+    
+    # Create export with metadata
+    jq --arg export_time "$(date -Iseconds)" '{
+        export_info: {
+            exported_at: $export_time,
+            exported_by: "NFCman",
+            version: "2.0"
+        },
+        card_data: .
+    }' "$card_file" > "$export_name"
+    
+    log "[+] Card exported to: $export_name"
+}
+
+import_card() {
+    echo -n "[?] Enter import file path: "
+    read -r import_file
+    
+    if [ ! -f "$import_file" ]; then
+        log "[!] File not found: $import_file"
+        return 1
+    fi
+    
+    # Check if it's an export format or direct card format
+    if jq -e '.card_data' "$import_file" >/dev/null 2>&1; then
+        # Export format
+        local uid=$(jq -r '.card_data.UID' "$import_file")
+        jq '.card_data' "$import_file" > "$CARDS_DIR/card_${uid}.json"
+    else
+        # Direct card format
+        local uid=$(jq -r '.UID' "$import_file")
+        cp "$import_file" "$CARDS_DIR/card_${uid}.json"
+    fi
+    
+    log "[+] Card imported: $uid"
+}
+
+delete_card() {
+    list_saved_cards
+    echo
     echo -n "[?] Enter card UID to delete: "
     read -r card_uid
     
     if [ -z "$card_uid" ]; then
-        log "[!] No card UID provided"
+        log "[!] No UID provided"
         return 1
     fi
     
-    echo -n "[?] Are you sure you want to delete this card? (y/n): "
+    local card_file="$CARDS_DIR/card_${card_uid}.json"
+    if [ ! -f "$card_file" ]; then
+        log "[!] Card not found: $card_uid"
+        return 1
+    fi
+    
+    echo -n "[?] Delete card $card_uid? (y/N): "
     read -r confirm
     
     if [[ $confirm =~ ^[Yy]$ ]]; then
-        delete_card "$card_uid"
+        rm "$card_file"
+        log "[+] Card deleted: $card_uid"
     else
         log "[*] Deletion cancelled"
     fi
 }
 
-# Main function
+show_menu() {
+    clear
+    echo "════════════════════════════════════════════════════════════════"
+    echo "║                          NFCman                              ║"
+    echo "════════════════════════════════════════════════════════════════"
+    echo "║  1. Read NFC Card          │  5. Analyze Card                ║"
+    echo "║  2. List Saved Cards       │  6. Export Card                 ║"
+    echo "║  3. Emulate NFC Card       │  7. Import Card                 ║"
+    echo "║  4. Modify Card Data       │  8. Delete Card                 ║"
+    echo "║                            │  9. Exit                        ║"
+    echo "════════════════════════════════════════════════════════════════"
+    echo
+    echo -n "[?] Choose option: "
+}
+
 main() {
-    # Check dependencies
-    check_dependencies
-    
-    # Load configuration
-    load_config
+    # Initial setup
+    if ! check_android_app; then
+        echo "Install the Android NFC Clone app first, then run this script."
+        exit 1
+    fi
     
     while true; do
         show_menu
         read -r choice
+        echo
         
         case $choice in
             1) read_card ;;
@@ -238,13 +402,17 @@ main() {
             3) emulate_card ;;
             4) modify_card ;;
             5) analyze_card ;;
-            6) export_import_menu ;;
-            7) delete_card_menu ;;
-            8) exit 0 ;;
-            *) echo "[!] Invalid option. Please try again." ;;
+            6) export_card ;;
+            7) import_card ;;
+            8) delete_card ;;
+            9) exit 0 ;;
+            *) log "[!] Invalid option" ;;
         esac
+        
+        echo
+        echo "Press Enter to continue..."
+        read -r
     done
 }
 
-# Run main function
 main
