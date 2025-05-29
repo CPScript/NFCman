@@ -1,10 +1,10 @@
 #!/bin/bash
-# Fixed?
+# NFCman Android Installation Script. Fixed?
 
 set -e
 
 echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║                              NFCman                           ║"
+echo "║                            NFCman                             ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
 
 # Verify Termux environment
@@ -50,7 +50,12 @@ cat > config.json << 'EOF'
         "NTAG216",
         "ISO14443-4",
         "FeliCa"
-    ]
+    ],
+    "emulation": {
+        "default_response": "9000",
+        "auto_start": false,
+        "notification_enabled": true
+    }
 }
 EOF
 
@@ -76,15 +81,13 @@ if ! command -v aapt >/dev/null 2>&1; then
     exit 1
 fi
 
-# Build commands would go here
-# This would typically involve gradle build commands
 echo "[*] Building APK..."
 echo "[!] Complete build process requires Android Studio or gradle setup"
 EOF
 
 chmod +x build_android_app.sh
 
-# Create the corrected layout file
+# Create the layout file
 echo "[*] Creating Android layout files..."
 mkdir -p android/res/layout
 cat > android/res/layout/activity_reader.xml << 'EOF'
@@ -158,42 +161,89 @@ cat > android/res/xml/nfc_tech_filter.xml << 'EOF'
 </resources>
 EOF
 
-# Create broadcast receiver for emulation control
-cat > android/src/com/nfcclone/app/EmulationControlReceiver.java << 'EOF'
+# Create MainActivity for the Android app
+mkdir -p android/src/com/nfcclone/app
+cat > android/src/com/nfcclone/app/MainActivity.java << 'EOF'
 package com.nfcclone.app;
 
-import android.content.BroadcastReceiver;
-import android.content.Context;
+import android.app.Activity;
 import android.content.Intent;
-import android.content.SharedPreferences;
-import android.util.Log;
+import android.os.Bundle;
+import android.widget.Button;
+import android.view.View;
 
-public class EmulationControlReceiver extends BroadcastReceiver {
-    private static final String TAG = "EmulationControl";
+public class MainActivity extends Activity {
     
     @Override
-    public void onReceive(Context context, Intent intent) {
-        if ("com.nfcclone.app.STOP_EMULATION".equals(intent.getAction())) {
-            Log.d(TAG, "Stopping emulation via broadcast");
-            
-            SharedPreferences prefs = context.getSharedPreferences("NfcClonePrefs", Context.MODE_PRIVATE);
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.remove("current_card_path");
-            editor.apply();
-            
-            // Clear emulation config file
-            java.io.File configFile = new java.io.File("/storage/emulated/0/Android/data/com.nfcclone.app/files/emulation_config.json");
-            if (configFile.exists()) {
-                configFile.delete();
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        
+        Button readButton = findViewById(R.id.read_button);
+        readButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent intent = new Intent(MainActivity.this, NFCReaderActivity.class);
+                startActivity(intent);
             }
-        }
+        });
     }
 }
 EOF
 
+# Create main activity layout
+cat > android/res/layout/activity_main.xml << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#1a1a1a">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="NFC Clone"
+        android:textSize="32sp"
+        android:textColor="#ffffff"
+        android:textAlignment="center"
+        android:layout_marginBottom="48dp" />
+
+    <Button
+        android:id="@+id/read_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Read NFC Card"
+        android:textSize="18sp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Use the Termux script to manage and emulate cards"
+        android:textColor="#cccccc"
+        android:textAlignment="center"
+        android:layout_marginTop="24dp" />
+
+</LinearLayout>
+EOF
+
+# Create string resources
+mkdir -p android/res/values
+cat > android/res/values/strings.xml << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NFC Clone</string>
+    <string name="service_description">NFC Card Emulation Service</string>
+    <string name="payment_cards">Payment Cards</string>
+    <string name="access_cards">Access Control Cards</string>
+</resources>
+EOF
+
 # Set executable permissions
 echo "[*] Setting permissions..."
-chmod +x nfc_manager_fixed.sh
+chmod +x nfc_manager.sh
 
 # Check NFC availability
 echo "[*] Checking NFC capability..."
@@ -225,14 +275,10 @@ echo "1. Build and install the Android app:"
 echo "   - Use Android Studio to build android/ directory"
 echo "   - Or install pre-built APK if available"
 echo ""
-echo "2. Run the fixed NFC manager:"
+echo "2. Run the NFC manager:"
 echo "   ./nfc_manager.sh"
 echo ""
 echo "3. Enable NFC in device settings if not already enabled"
 echo ""
-echo "The Android app component is required for NFC functionality."
-echo "The original framework failed because it tried to use desktop"
-echo "Linux NFC libraries on Android, which cannot work."
-EOF
-
-chmod +x install_fixed.sh
+echo "The Android app is required for NFC card reading and emulation."
+echo "All card management is handled through the Termux interface."
