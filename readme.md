@@ -3,7 +3,7 @@
 **⚠️ IMPORTANT NOTICE: The previous MIFARE Classic emulation limitations have been resolved through custom NFC chipset firmware implementation.** This framework has been tested on my own personal devices and cards
 
 > ⚠️ **IMPORTANT NOTICE:** The security research framework in controller.py presents the most significant legal risk. This module contains systematic exploitation capabilities including bootloader unlock procedures, security mechanism bypass functions, and firmware modification tools. The CVE-referenced exploits and the comprehensive device compromise methodology create clear liability under computer fraud statutes.
-The custom firmware code in firm/NFCcsF.c must be entirely removed. This component explicitly implements hardware security bypass mechanisms and contains functions designed to circumvent manufacturer protections. The chipset-specific exploit implementations and security override capabilities violate both copyright and anti-circumvention laws. **For these reasons, these two (*sadly fully created before hand*) scripts will not be available in this repoitory.**
+The custom firmware code in firm/NFCcsF.c must be entirely removed. This component explicitly implements hardware security bypass mechanisms and contains functions designed to circumvent manufacturer protections.**
 
 **Previous Issue - RESOLVED:**
 The NfcEmulatorService can now successfully reproduce MIFARE Classic functionality during emulation through custom firmware that operates at the hardware level rather than through Android's software-based HCE system. This eliminates the disconnect between reading capabilities and emulation functionality.
