@@ -1,447 +1,425 @@
 #!/bin/bash
+
 LOG_FILE="nfc_clone.log"
-ANDROID_DATA_DIR="/storage/emulated/0/Android/data/com.nfcclone.app/files"
-CARDS_DIR="$ANDROID_DATA_DIR/cards"
 PACKAGE_NAME="com.nfcclone.app"
-FIRMWARE_DIR="./firm"
-FRAMEWORK_DIR="./framework"
+CONFIG_FILE="config.json"
+
+ANDROID_VERSION=""
+TERMUX_CARDS_DIR=""
+ANDROID_DATA_DIR=""
+PRIMARY_CARDS_DIR=""
+USE_FALLBACK_DETECTION=""
+REQUIRE_APP_INITIALIZATION=""
+USE_INTERNAL_STORAGE=""
+
+load_configuration() {
+    if [ -f "$CONFIG_FILE" ]; then
+        ANDROID_VERSION=$(jq -r '.android_version // 0' "$CONFIG_FILE" 2>/dev/null)
+        TERMUX_CARDS_DIR=$(jq -r '.termux_cards_dir // ""' "$CONFIG_FILE" 2>/dev/null)
+        ANDROID_DATA_DIR=$(jq -r '.android_data_dir // ""' "$CONFIG_FILE" 2>/dev/null)
+        PRIMARY_CARDS_DIR=$(jq -r '.primary_cards_dir // ""' "$CONFIG_FILE" 2>/dev/null)
+        USE_FALLBACK_DETECTION=$(jq -r '.compatibility.use_fallback_detection // false' "$CONFIG_FILE" 2>/dev/null)
+        REQUIRE_APP_INITIALIZATION=$(jq -r '.compatibility.require_app_initialization // false' "$CONFIG_FILE" 2>/dev/null)
+        USE_INTERNAL_STORAGE=$(jq -r '.compatibility.use_internal_storage // false' "$CONFIG_FILE" 2>/dev/null)
+    fi
+    
+    if [ -z "$ANDROID_VERSION" ] || [ "$ANDROID_VERSION" = "0" ]; then
+        ANDROID_VERSION=$(detect_android_version)
+        update_configuration
+    fi
+    
+    if [ -z "$TERMUX_CARDS_DIR" ]; then
+        TERMUX_CARDS_DIR="$HOME/nfc_cards"
+    fi
+    
+    if [ -z "$ANDROID_DATA_DIR" ]; then
+        ANDROID_DATA_DIR="/storage/emulated/0/Android/data/com.nfcclone.app/files"
+    fi
+    
+    if [ -z "$PRIMARY_CARDS_DIR" ]; then
+        if [ "$ANDROID_VERSION" -ge 11 ]; then
+            PRIMARY_CARDS_DIR="$TERMUX_CARDS_DIR"
+        else
+            PRIMARY_CARDS_DIR="$ANDROID_DATA_DIR/cards"
+        fi
+    fi
+}
+
+detect_android_version() {
+    local version
+    version=$(getprop ro.build.version.release 2>/dev/null | cut -d. -f1)
+    if [ -z "$version" ]; then
+        version=$(getprop ro.build.version.sdk 2>/dev/null)
+        if [ "$version" -ge 33 ]; then
+            version=13
+        elif [ "$version" -ge 30 ]; then
+            version=11
+        elif [ "$version" -ge 28 ]; then
+            version=9
+        elif [ "$version" -ge 26 ]; then
+            version=8
+        elif [ "$version" -ge 23 ]; then
+            version=6
+        else
+            version=5
+        fi
+    fi
+    echo "$version"
+}
+
+update_configuration() {
+    if [ -f "$CONFIG_FILE" ]; then
+        local temp_config=$(mktemp)
+        jq --arg version "$ANDROID_VERSION" '.android_version = ($version | tonumber)' "$CONFIG_FILE" > "$temp_config"
+        mv "$temp_config" "$CONFIG_FILE"
+    fi
+}
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
+check_android_app_legacy() {
+    if command -v pm >/dev/null 2>&1; then
+        if pm list packages 2>/dev/null | grep -q "$PACKAGE_NAME"; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+check_android_app_modern() {
+    if am start -n "$PACKAGE_NAME/.MainActivity" --activity-clear-task >/dev/null 2>&1; then
+        sleep 2
+        return 0
+    fi
+    
+    if [ -d "$ANDROID_DATA_DIR" ] || [ -d "/data/data/$PACKAGE_NAME" ]; then
+        return 0
+    fi
+    
+    if dumpsys package "$PACKAGE_NAME" 2>/dev/null | grep -q "versionName"; then
+        return 0
+    fi
+    
+    if dumpsys activity "$PACKAGE_NAME" 2>/dev/null | grep -q "$PACKAGE_NAME"; then
+        return 0
+    fi
+    
+    return 1
+}
+
 check_android_app() {
-    if ! pm list packages | grep -q "$PACKAGE_NAME"; then
-        log "[!] NFC Clone app not installed"
-        log "[!] Please install the APK first"
+    log "[*] Checking if NFC Clone app is installed (Android $ANDROID_VERSION)..."
+    
+    local app_detected=false
+    
+    if [ "$USE_FALLBACK_DETECTION" = "true" ] || [ "$ANDROID_VERSION" -ge 11 ]; then
+        if check_android_app_modern; then
+            app_detected=true
+        fi
+    else
+        if check_android_app_legacy; then
+            app_detected=true
+        else
+            if check_android_app_modern; then
+                app_detected=true
+            fi
+        fi
+    fi
+    
+    if [ "$app_detected" = true ]; then
+        log "[+] App detected"
+        setup_directories
+        return 0
+    else
+        log "[!] NFC Clone app not found"
+        if [ "$REQUIRE_APP_INITIALIZATION" = "true" ]; then
+            log "[!] Please install and launch the APK first (required for Android $ANDROID_VERSION)"
+        else
+            log "[!] Please install the APK"
+        fi
+        return 1
+    fi
+}
+
+setup_directories() {
+    log "[*] Setting up directory structure for Android $ANDROID_VERSION..."
+    
+    mkdir -p "$TERMUX_CARDS_DIR"
+    
+    if [ "$USE_INTERNAL_STORAGE" = "false" ] && [ "$ANDROID_VERSION" -lt 11 ]; then
+        mkdir -p "$ANDROID_DATA_DIR" 2>/dev/null || true
+        mkdir -p "$ANDROID_DATA_DIR/cards" 2>/dev/null || true
+    fi
+    
+    if [ ! -d "$PRIMARY_CARDS_DIR" ]; then
+        mkdir -p "$PRIMARY_CARDS_DIR" 2>/dev/null || {
+            log "[*] Cannot create primary directory, using Termux fallback"
+            PRIMARY_CARDS_DIR="$TERMUX_CARDS_DIR"
+        }
+    fi
+    
+    log "[+] Using cards directory: $PRIMARY_CARDS_DIR"
+}
+
+check_nfc_enabled_legacy() {
+    local nfc_status=$(settings get secure nfc_enabled 2>/dev/null)
+    if [ "$nfc_status" = "1" ]; then
+        return 0
+    elif [ "$nfc_status" = "0" ]; then
         return 1
     fi
     
-    if [ ! -d "$ANDROID_DATA_DIR" ]; then
-        mkdir -p "$ANDROID_DATA_DIR"
-        mkdir -p "$CARDS_DIR"
+    nfc_status=$(getprop ro.nfc.enabled 2>/dev/null)
+    if [ "$nfc_status" = "1" ]; then
+        return 0
     fi
     
-    return 0
+    return 2
+}
+
+check_nfc_enabled_modern() {
+    if dumpsys nfc 2>/dev/null | grep -q "mIsNfcEnabled.*true"; then
+        return 0
+    fi
+    
+    if [ -d "/sys/class/nfc" ]; then
+        for nfc_device in /sys/class/nfc/nfc*; do
+            if [ -f "$nfc_device/rf_mode" ]; then
+                local rf_mode=$(cat "$nfc_device/rf_mode" 2>/dev/null)
+                if [ "$rf_mode" != "0" ]; then
+                    return 0
+                fi
+            fi
+        done
+    fi
+    
+    return 1
 }
 
 check_nfc_enabled() {
-    local nfc_status=$(settings get secure nfc_enabled 2>/dev/null)
-    if [ "$nfc_status" != "1" ]; then
-        log "[!] NFC is disabled. Enable in Settings > Connected devices > NFC"
-        return 1
-    fi
-    return 0
-}
-
-check_firmware_framework() {
-    if [ ! -f "$FRAMEWORK_DIR/framework_controller.py" ]; then
-        log "[!] Security research framework not found"
-        log "[*] Initializing framework components..."
-        
-        # Create framework directory and components
-        mkdir -p "$FRAMEWORK_DIR"
-        
-        # Generate framework controller script
-        cat > "$FRAMEWORK_DIR/framework_controller.py" << 'EOF'
-#!/usr/bin/env python3
-import sys
-import json
-import subprocess
-import os
-import time
-
-class NFCFrameworkController:
-    def __init__(self):
-        self.device_id = None
-        self.framework_initialized = False
+    local nfc_result
     
-    def initialize_framework(self):
-        """Initialize the security research framework"""
-        try:
-            # Check for ADB connectivity
-            result = subprocess.run(['adb', 'devices'], capture_output=True, text=True)
-            if 'device' not in result.stdout:
-                return False, "No ADB device connected"
-            
-            # Get device ID
-            lines = result.stdout.strip().split('\n')[1:]
-            for line in lines:
-                if 'device' in line:
-                    self.device_id = line.split()[0]
-                    break
-            
-            if not self.device_id:
-                return False, "Could not identify device"
-            
-            self.framework_initialized = True
-            return True, f"Framework initialized for device: {self.device_id}"
-            
-        except Exception as e:
-            return False, f"Framework initialization failed: {e}"
-    
-    def detect_nfc_chipset(self):
-        """Detect NFC chipset type"""
-        if not self.framework_initialized:
-            return None, "Framework not initialized"
-        
-        try:
-            # Query NFC hardware information
-            cmd = ['adb', '-s', self.device_id, 'shell', 'cat /sys/class/nfc/nfc*/device/chip_id 2>/dev/null || echo "unknown"']
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            chip_info = result.stdout.strip()
-            
-            # Detect chipset based on chip ID
-            chipset_mappings = {
-                '0x544C': 'NXP_PN544',
-                '0x547C': 'NXP_PN547', 
-                '0x548C': 'NXP_PN548',
-                '0x2079': 'Broadcom_BCM20791',
-                '0x2080': 'Broadcom_BCM20795',
-                '0x6595': 'Qualcomm_QCA6595'
-            }
-            
-            for chip_id, chipset in chipset_mappings.items():
-                if chip_id in chip_info:
-                    return chipset, f"Detected: {chipset}"
-            
-            # Fallback detection via hardware path analysis
-            cmd = ['adb', '-s', self.device_id, 'shell', 'find /sys -name "*nfc*" -type d 2>/dev/null']
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            paths = result.stdout.strip()
-            
-            if 'pn5' in paths.lower():
-                return 'NXP_PN5XX_SERIES', 'Detected: NXP PN5XX Series'
-            elif 'bcm' in paths.lower():
-                return 'BROADCOM_BCM_SERIES', 'Detected: Broadcom BCM Series'
-            elif 'qca' in paths.lower():
-                return 'QUALCOMM_QCA_SERIES', 'Detected: Qualcomm QCA Series'
-            
-            return 'UNKNOWN', f'Unknown chipset, chip_info: {chip_info}'
-            
-        except Exception as e:
-            return None, f"Chipset detection failed: {e}"
-    
-    def check_firmware_status(self):
-        """Check if custom firmware is deployed"""
-        try:
-            cmd = ['adb', '-s', self.device_id, 'shell', 'cat /sys/class/nfc/nfc*/device/firmware_version 2>/dev/null || echo "unknown"']
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            firmware_info = result.stdout.strip()
-            
-            # Check for custom firmware signatures
-            custom_signatures = ['nfcman_custom', 'bypass_enabled', 'unrestricted', 'custom_fw']
-            
-            for signature in custom_signatures:
-                if signature in firmware_info.lower():
-                    return True, f"Custom firmware detected: {firmware_info}"
-            
-            return False, f"Stock firmware detected: {firmware_info}"
-            
-        except Exception as e:
-            return False, f"Firmware status check failed: {e}"
-    
-    def deploy_firmware(self, chipset_type):
-        """Deploy custom firmware for detected chipset"""
-        try:
-            firmware_file = f"../firm/NFCcsF_{chipset_type.lower()}.bin"
-            
-            if not os.path.exists(firmware_file):
-                # Use generic firmware if specific variant not available
-                firmware_file = "../firm/NFCcsF"
-            
-            if not os.path.exists(firmware_file):
-                return False, f"Firmware file not found: {firmware_file}"
-            
-            # Execute security bypass sequence
-            bypass_success = self._execute_security_bypass()
-            if not bypass_success:
-                return False, "Security bypass failed"
-            
-            # Deploy firmware
-            deployment_success = self._deploy_firmware_binary(firmware_file)
-            if not deployment_success:
-                return False, "Firmware deployment failed"
-            
-            # Verify deployment
-            time.sleep(3)  # Allow firmware to initialize
-            deployed, status = self.check_firmware_status()
-            
-            if deployed:
-                return True, f"Firmware deployment successful: {status}"
-            else:
-                return False, f"Firmware verification failed: {status}"
-                
-        except Exception as e:
-            return False, f"Firmware deployment error: {e}"
-    
-    def _execute_security_bypass(self):
-        """Execute security bypass sequence"""
-        bypass_commands = [
-            # Disable Android security mechanisms
-            'su -c "setprop persist.vendor.nfc.secure_mode 0" 2>/dev/null || true',
-            'su -c "setprop persist.nfc.secure_element 0" 2>/dev/null || true',
-            
-            # Disable dm-verity if possible
-            'su -c "echo 0 > /sys/module/dm_verity/parameters/enabled" 2>/dev/null || true',
-            
-            # Set NFC controller to unrestricted mode
-            'su -c "echo unrestricted > /sys/class/nfc/nfc*/device/mode" 2>/dev/null || true'
-        ]
-        
-        for cmd in bypass_commands:
-            adb_cmd = ['adb', '-s', self.device_id, 'shell', cmd]
-            subprocess.run(adb_cmd, capture_output=True)
-        
-        return True
-    
-    def _deploy_firmware_binary(self, firmware_file):
-        """Deploy firmware binary to device"""
-        try:
-            # Transfer firmware to device
-            transfer_cmd = ['adb', '-s', self.device_id, 'push', firmware_file, '/data/local/tmp/custom_firmware.bin']
-            result = subprocess.run(transfer_cmd, capture_output=True, text=True)
-            
-            if result.returncode != 0:
-                return False
-            
-            # Flash firmware (this is a simplified representation)
-            flash_commands = [
-                'su -c "chmod 644 /data/local/tmp/custom_firmware.bin"',
-                'su -c "cat /data/local/tmp/custom_firmware.bin > /sys/class/nfc/nfc*/device/firmware_update" 2>/dev/null || true',
-                'su -c "echo 1 > /sys/class/nfc/nfc*/device/reset" 2>/dev/null || true'
-            ]
-            
-            for cmd in flash_commands:
-                adb_cmd = ['adb', '-s', self.device_id, 'shell', cmd]
-                subprocess.run(adb_cmd, capture_output=True)
-            
-            return True
-            
-        except Exception as e:
-            print(f"Firmware deployment error: {e}")
-            return False
-
-if __name__ == "__main__":
-    controller = NFCFrameworkController()
-    
-    if len(sys.argv) < 2:
-        print("Usage: framework_controller.py <command> [args]")
-        sys.exit(1)
-    
-    command = sys.argv[1]
-    
-    if command == "init":
-        success, message = controller.initialize_framework()
-        print(json.dumps({"success": success, "message": message}))
-    
-    elif command == "detect_chipset":
-        success, message = controller.initialize_framework()
-        if success:
-            chipset, status = controller.detect_nfc_chipset()
-            print(json.dumps({"chipset": chipset, "status": status}))
-        else:
-            print(json.dumps({"error": message}))
-    
-    elif command == "check_firmware":
-        success, message = controller.initialize_framework()
-        if success:
-            deployed, status = controller.check_firmware_status()
-            print(json.dumps({"deployed": deployed, "status": status}))
-        else:
-            print(json.dumps({"error": message}))
-    
-    elif command == "deploy_firmware":
-        if len(sys.argv) < 3:
-            print(json.dumps({"error": "Chipset type required"}))
-            sys.exit(1)
-        
-        chipset_type = sys.argv[2]
-        success, message = controller.initialize_framework()
-        if success:
-            deployed, status = controller.deploy_firmware(chipset_type)
-            print(json.dumps({"success": deployed, "message": status}))
-        else:
-            print(json.dumps({"error": message}))
-    
-    else:
-        print(json.dumps({"error": f"Unknown command: {command}"}))
-EOF
-        
-        chmod +x "$FRAMEWORK_DIR/framework_controller.py"
-        log "[+] Framework components initialized"
-    fi
-    
-    return 0
-}
-
-initialize_firmware_framework() {
-    log "[*] Initializing firmware deployment framework..."
-    
-    if ! check_firmware_framework; then
-        log "[!] Framework initialization failed"
-        return 1
-    fi
-    
-    # Initialize the framework
-    local result=$(python3 "$FRAMEWORK_DIR/framework_controller.py" init 2>/dev/null)
-    local success=$(echo "$result" | jq -r '.success // false' 2>/dev/null)
-    
-    if [ "$success" = "true" ]; then
-        log "[+] Framework initialized successfully"
-        return 0
+    if [ "$ANDROID_VERSION" -ge 11 ]; then
+        check_nfc_enabled_modern
+        nfc_result=$?
     else
-        local message=$(echo "$result" | jq -r '.message // "Unknown error"' 2>/dev/null)
-        log "[!] Framework initialization failed: $message"
-        return 1
+        check_nfc_enabled_legacy
+        nfc_result=$?
     fi
+    
+    case $nfc_result in
+        0)
+            log "[+] NFC is enabled"
+            return 0
+            ;;
+        1)
+            log "[!] NFC is disabled. Enable in Settings > Connected devices > NFC"
+            return 1
+            ;;
+        *)
+            log "[*] NFC status unknown - proceeding anyway"
+            return 0
+            ;;
+    esac
 }
 
-detect_nfc_chipset() {
-    log "[*] Detecting NFC chipset..."
-    
-    local result=$(python3 "$FRAMEWORK_DIR/framework_controller.py" detect_chipset 2>/dev/null)
-    local chipset=$(echo "$result" | jq -r '.chipset // "UNKNOWN"' 2>/dev/null)
-    local status=$(echo "$result" | jq -r '.status // "Detection failed"' 2>/dev/null)
-    
-    log "[*] $status"
-    echo "$chipset"
+start_reader_activity_legacy() {
+    am start -n "$PACKAGE_NAME/.NFCReaderActivity" --activity-clear-top
 }
 
-check_custom_firmware() {
-    log "[*] Checking firmware status..."
-    
-    local result=$(python3 "$FRAMEWORK_DIR/framework_controller.py" check_firmware 2>/dev/null)
-    local deployed=$(echo "$result" | jq -r '.deployed // false' 2>/dev/null)
-    local status=$(echo "$result" | jq -r '.status // "Status unknown"' 2>/dev/null)
-    
-    log "[*] $status"
-    
-    if [ "$deployed" = "true" ]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-deploy_custom_firmware() {
-    log "[*] Starting custom firmware deployment..."
-    
-    if ! check_android_app || ! check_nfc_enabled; then
-        return 1
-    fi
-    
-    # Initialize framework
-    if ! initialize_firmware_framework; then
-        log "[!] Cannot proceed without framework"
-        return 1
-    fi
-    
-    # Detect chipset
-    local chipset=$(detect_nfc_chipset)
-    if [ "$chipset" = "UNKNOWN" ]; then
-        log "[!] Cannot deploy firmware for unknown chipset"
-        log "[!] Manual firmware deployment may be required"
-        return 1
-    fi
-    
-    # Check if already deployed
-    if check_custom_firmware; then
-        log "[+] Custom firmware already deployed and active"
+start_reader_activity_modern() {
+    if am start -n "$PACKAGE_NAME/.NFCReaderActivity" --activity-clear-top 2>/dev/null; then
         return 0
     fi
     
-    # Deploy firmware
-    log "[*] Deploying firmware for chipset: $chipset"
-    log "[!] This operation requires root access and may take several minutes"
-    echo -n "[?] Continue with firmware deployment? (y/N): "
-    read -r confirm
-    
-    if [[ ! $confirm =~ ^[Yy]$ ]]; then
-        log "[*] Firmware deployment cancelled"
+    if am start -n "$PACKAGE_NAME/.MainActivity" --activity-clear-top 2>/dev/null; then
+        sleep 1
+        am start -n "$PACKAGE_NAME/.NFCReaderActivity" 2>/dev/null || return 1
         return 0
     fi
     
-    local result=$(python3 "$FRAMEWORK_DIR/framework_controller.py" deploy_firmware "$chipset" 2>/dev/null)
-    local success=$(echo "$result" | jq -r '.success // false' 2>/dev/null)
-    local message=$(echo "$result" | jq -r '.message // "Deployment failed"' 2>/dev/null)
-    
-    if [ "$success" = "true" ]; then
-        log "[+] $message"
-        log "[+] Hardware-level emulation now available"
-        termux-notification --title "Firmware Deployed" --content "Custom NFC firmware active"
-        return 0
-    else
-        log "[!] $message"
-        log "[!] Falling back to software-based emulation"
-        return 1
-    fi
+    return 1
 }
 
 read_card() {
-    log "[*] Starting NFC card reading through Android app..."
+    log "[*] Starting NFC card reading..."
     
-    if ! check_android_app || ! check_nfc_enabled; then
-        return 1
+    if ! check_android_app; then
+        if [ "$REQUIRE_APP_INITIALIZATION" = "true" ]; then
+            log "[!] Please install and launch the NFC Clone app first"
+            return 1
+        else
+            log "[!] Please install the NFC Clone app"
+            return 1
+        fi
+    fi
+    
+    if ! check_nfc_enabled; then
+        echo -n "[?] Continue anyway? (y/N): "
+        read -r continue_anyway
+        if [[ ! $continue_anyway =~ ^[Yy]$ ]]; then
+            return 1
+        fi
     fi
     
     log "[*] Launching NFC reader application..."
-    am start -n "$PACKAGE_NAME/.NFCReaderActivity" --activity-clear-top
     
-    if [ $? -eq 0 ]; then
-        log "[+] NFC reader started. Use the Android app to read cards."
-        termux-notification --title "NFC Reader Active" --content "Use the NFC Clone app to read cards"
-        log "[*] Cards will be saved automatically to $CARDS_DIR"
+    local reader_started=false
+    
+    if [ "$ANDROID_VERSION" -ge 11 ]; then
+        if start_reader_activity_modern; then
+            reader_started=true
+        fi
+    else
+        if start_reader_activity_legacy; then
+            reader_started=true
+        fi
+    fi
+    
+    if [ "$reader_started" = true ]; then
+        log "[+] NFC reader started successfully"
+        
+        if command -v termux-notification >/dev/null 2>&1; then
+            termux-notification --title "NFC Reader Active" \
+                               --content "Use the NFC Clone app to read cards" 2>/dev/null || true
+        fi
+        
+        log "[*] Cards will be saved to: $PRIMARY_CARDS_DIR"
         log "[*] Return to this menu after reading cards"
     else
-        log "[!] Failed to start NFC reader"
+        log "[!] Failed to start app - try launching manually"
         return 1
     fi
 }
 
 list_saved_cards() {
-    if [ ! -d "$CARDS_DIR" ]; then
-        log "[!] No cards directory found"
+    if [ ! -d "$PRIMARY_CARDS_DIR" ]; then
+        log "[!] No cards directory found at: $PRIMARY_CARDS_DIR"
+        log "[*] Read a card first to create the directory"
         return 1
     fi
     
-    log "[*] Saved cards:"
+    log "[*] Saved cards in: $PRIMARY_CARDS_DIR"
     echo "----------------------------------------"
     printf "| %-18s | %-15s |\n" "UID" "Type"
     echo "----------------------------------------"
     
-    for card_file in "$CARDS_DIR"/card_*.json; do
+    local found_cards=false
+    for card_file in "$PRIMARY_CARDS_DIR"/card_*.json; do
         if [ -f "$card_file" ]; then
             local uid=$(jq -r '.UID // "Unknown"' "$card_file" 2>/dev/null)
             local type=$(jq -r '.Technologies[0] // "Unknown"' "$card_file" 2>/dev/null | sed 's/.*\.//')
             printf "| %-18s | %-15s |\n" "$uid" "${type:0:15}"
+            found_cards=true
         fi
     done
+    
+    if [ "$ANDROID_VERSION" -ge 11 ] && [ "$PRIMARY_CARDS_DIR" != "$TERMUX_CARDS_DIR" ]; then
+        for card_file in "$TERMUX_CARDS_DIR"/card_*.json; do
+            if [ -f "$card_file" ]; then
+                local uid=$(jq -r '.UID // "Unknown"' "$card_file" 2>/dev/null)
+                local type=$(jq -r '.Technologies[0] // "Unknown"' "$card_file" 2>/dev/null | sed 's/.*\.//')
+                printf "| %-18s | %-15s |\n" "$uid" "${type:0:15}"
+                found_cards=true
+            fi
+        done
+    fi
+    
+    if [ "$found_cards" = false ]; then
+        echo "| No cards found    |                 |"
+    fi
+    
     echo "----------------------------------------"
+}
+
+find_card_file() {
+    local card_uid="$1"
+    
+    if [ -f "$PRIMARY_CARDS_DIR/card_${card_uid}.json" ]; then
+        echo "$PRIMARY_CARDS_DIR/card_${card_uid}.json"
+        return 0
+    fi
+    
+    if [ "$PRIMARY_CARDS_DIR" != "$TERMUX_CARDS_DIR" ] && [ -f "$TERMUX_CARDS_DIR/card_${card_uid}.json" ]; then
+        echo "$TERMUX_CARDS_DIR/card_${card_uid}.json"
+        return 0
+    fi
+    
+    if [ "$PRIMARY_CARDS_DIR" != "$ANDROID_DATA_DIR/cards" ] && [ -f "$ANDROID_DATA_DIR/cards/card_${card_uid}.json" ]; then
+        echo "$ANDROID_DATA_DIR/cards/card_${card_uid}.json"
+        return 0
+    fi
+    
+    return 1
+}
+
+create_emulation_config() {
+    local card_uid="$1"
+    local card_file="$2"
+    
+    local config_created=false
+    local config_file=""
+    
+    if [ "$ANDROID_VERSION" -lt 11 ] && [ -d "$ANDROID_DATA_DIR" ]; then
+        config_file="$ANDROID_DATA_DIR/emulation_config.json"
+        cat > "$config_file" 2>/dev/null << EOF && config_created=true
+{
+    "active": true,
+    "card_uid": "$card_uid",
+    "card_file": "$card_file",
+    "timestamp": $(date +%s)
+}
+EOF
+    fi
+    
+    if [ "$config_created" = false ]; then
+        config_file="$TERMUX_CARDS_DIR/emulation_config.json"
+        cat > "$config_file" << EOF
+{
+    "active": true,
+    "card_uid": "$card_uid",
+    "card_file": "$card_file",
+    "timestamp": $(date +%s)
+}
+EOF
+        config_created=true
+    fi
+    
+    echo "$config_file"
+}
+
+start_emulation_service() {
+    local card_uid="$1"
+    
+    if [ "$ANDROID_VERSION" -ge 11 ]; then
+        if am startservice -n "$PACKAGE_NAME/.NfcEmulatorService" \
+            --es "action" "start_emulation" \
+            --es "card_uid" "$card_uid" 2>/dev/null; then
+            return 0
+        fi
+        
+        if am start -n "$PACKAGE_NAME/.MainActivity" \
+            --es "emulate_uid" "$card_uid" 2>/dev/null; then
+            return 0
+        fi
+    else
+        if am startservice -n "$PACKAGE_NAME/.NfcEmulatorService" \
+            --es "action" "start_emulation" \
+            --es "card_uid" "$card_uid"; then
+            return 0
+        fi
+    fi
+    
+    return 1
 }
 
 emulate_card() {
     log "[*] Starting card emulation..."
     
-    if ! check_android_app || ! check_nfc_enabled; then
+    if ! check_android_app; then
         return 1
-    fi
-    
-    # Check firmware status and offer deployment
-    local hardware_emulation=false
-    if check_custom_firmware; then
-        log "[+] Custom firmware detected - hardware-level emulation available"
-        hardware_emulation=true
-    else
-        log "[*] Custom firmware not detected - using software emulation"
-        echo -n "[?] Deploy custom firmware for enhanced emulation? (y/N): "
-        read -r deploy_fw
-        
-        if [[ $deploy_fw =~ ^[Yy]$ ]]; then
-            if deploy_custom_firmware; then
-                hardware_emulation=true
-            fi
-        fi
     fi
     
     list_saved_cards
@@ -454,120 +432,107 @@ emulate_card() {
         return 1
     fi
     
-    local card_file="$CARDS_DIR/card_${card_uid}.json"
-    if [ ! -f "$card_file" ]; then
+    local card_file
+    card_file=$(find_card_file "$card_uid")
+    if [ $? -ne 0 ]; then
         log "[!] Card not found: $card_uid"
         return 1
     fi
     
-    # Create emulation configuration
-    local config_file="$ANDROID_DATA_DIR/emulation_config.json"
-    cat > "$config_file" << EOF
-{
-    "active": true,
-    "card_uid": "$card_uid",
-    "card_file": "$card_file",
-    "hardware_emulation": $hardware_emulation,
-    "timestamp": $(date +%s)
-}
-EOF
+    local config_file
+    config_file=$(create_emulation_config "$card_uid" "$card_file")
     
-    # Start emulation service
-    local emulation_mode="software-based HCE"
-    if [ "$hardware_emulation" = "true" ]; then
-        emulation_mode="hardware-level"
-    fi
-    
-    am startservice -n "$PACKAGE_NAME/.NfcEmulatorService" \
-        --es "action" "start_emulation" \
-        --es "card_uid" "$card_uid" \
-        --ez "hardware_mode" "$hardware_emulation"
-    
-    if [ $? -eq 0 ]; then
-        log "[+] Emulation started for card: $card_uid ($emulation_mode)"
-        termux-notification --title "NFC Emulation Active" \
-                           --content "Emulating: $card_uid ($emulation_mode)" \
-                           --priority high --ongoing
+    if start_emulation_service "$card_uid"; then
+        log "[+] Emulation started for card: $card_uid"
+        
+        if command -v termux-notification >/dev/null 2>&1; then
+            termux-notification --title "NFC Emulation Active" \
+                               --content "Emulating: $card_uid" \
+                               --priority high --ongoing 2>/dev/null || true
+        fi
         
         echo "[*] Card emulation active. Press Ctrl+C to stop."
-        trap 'stop_emulation' INT TERM
+        trap 'stop_emulation "$config_file"' INT TERM
         
-        while true; do
+        while [ -f "$config_file" ]; do
             sleep 1
-            if [ ! -f "$config_file" ]; then
-                break
-            fi
         done
     else
         log "[!] Failed to start emulation"
+        log "[!] Try starting the app manually and using the emulation feature"
         return 1
     fi
 }
 
 stop_emulation() {
+    local config_file="$1"
+    
     log "[*] Stopping emulation..."
     
-    local config_file="$ANDROID_DATA_DIR/emulation_config.json"
-    rm -f "$config_file"
+    rm -f "$config_file" 2>/dev/null
+    rm -f "$ANDROID_DATA_DIR/emulation_config.json" 2>/dev/null
+    rm -f "$TERMUX_CARDS_DIR/emulation_config.json" 2>/dev/null
     
-    am broadcast -a "$PACKAGE_NAME.STOP_EMULATION"
-    termux-notification-remove nfc_emulation
+    am broadcast -a "$PACKAGE_NAME.STOP_EMULATION" 2>/dev/null || true
+    
+    if command -v termux-notification-remove >/dev/null 2>&1; then
+        termux-notification-remove nfc_emulation 2>/dev/null || true
+    fi
     
     log "[+] Emulation stopped"
     exit 0
 }
 
-check_firmware_status() {
+check_system_status() {
     log "[*] Checking system status..."
     echo
     echo "════════════════════════════════════════════════════════════════"
     echo "                         SYSTEM STATUS"
     echo "════════════════════════════════════════════════════════════════"
     
-    # Check Android app
-    if pm list packages | grep -q "$PACKAGE_NAME"; then
+    echo "[*] Android Version: $ANDROID_VERSION"
+    
+    if check_android_app >/dev/null 2>&1; then
         echo "[+] Android NFC Clone app: INSTALLED"
     else
-        echo "[!] Android NFC Clone app: NOT INSTALLED"
+        echo "[!] Android NFC Clone app: NOT FOUND"
     fi
     
-    # Check NFC status
-    local nfc_status=$(settings get secure nfc_enabled 2>/dev/null)
-    if [ "$nfc_status" = "1" ]; then
+    if check_nfc_enabled >/dev/null 2>&1; then
         echo "[+] NFC: ENABLED"
     else
-        echo "[!] NFC: DISABLED"
+        echo "[!] NFC: DISABLED OR UNKNOWN"
     fi
     
-    # Check framework
-    if [ -f "$FRAMEWORK_DIR/framework_controller.py" ]; then
-        echo "[+] Firmware framework: INITIALIZED"
-        
-        # Initialize and check firmware
-        if initialize_firmware_framework >/dev/null 2>&1; then
-            local chipset=$(detect_nfc_chipset)
-            echo "[+] NFC Chipset: $chipset"
-            
-            if check_custom_firmware >/dev/null 2>&1; then
-                echo "[+] Custom firmware: DEPLOYED"
-                echo "[+] Emulation mode: HARDWARE-LEVEL"
-            else
-                echo "[*] Custom firmware: NOT DEPLOYED"
-                echo "[*] Emulation mode: SOFTWARE (HCE)"
-            fi
-        else
-            echo "[!] Framework: CONNECTION FAILED"
-        fi
+    if [ -d "$PRIMARY_CARDS_DIR" ]; then
+        echo "[+] Primary cards directory: ACCESSIBLE"
+        echo "[*] Location: $PRIMARY_CARDS_DIR"
     else
-        echo "[*] Firmware framework: NOT INITIALIZED"
+        echo "[!] Primary cards directory: NOT ACCESSIBLE"
     fi
     
-    # Check saved cards
     local card_count=0
-    if [ -d "$CARDS_DIR" ]; then
-        card_count=$(find "$CARDS_DIR" -name "card_*.json" | wc -l)
+    if [ -d "$PRIMARY_CARDS_DIR" ]; then
+        card_count=$(find "$PRIMARY_CARDS_DIR" -name "card_*.json" 2>/dev/null | wc -l)
     fi
-    echo "[*] Saved cards: $card_count"
+    
+    if [ "$PRIMARY_CARDS_DIR" != "$TERMUX_CARDS_DIR" ] && [ -d "$TERMUX_CARDS_DIR" ]; then
+        local termux_count=$(find "$TERMUX_CARDS_DIR" -name "card_*.json" 2>/dev/null | wc -l)
+        card_count=$((card_count + termux_count))
+    fi
+    
+    echo "[*] Total saved cards: $card_count"
+    
+    if [ -w "/storage/emulated/0" ]; then
+        echo "[+] Storage permissions: GRANTED"
+    else
+        echo "[!] Storage permissions: LIMITED"
+    fi
+    
+    echo "[*] Configuration:"
+    echo "    - Use fallback detection: $USE_FALLBACK_DETECTION"
+    echo "    - Require app initialization: $REQUIRE_APP_INITIALIZATION"
+    echo "    - Use internal storage: $USE_INTERNAL_STORAGE"
     
     echo "════════════════════════════════════════════════════════════════"
 }
@@ -583,8 +548,9 @@ modify_card() {
         return 1
     fi
     
-    local card_file="$CARDS_DIR/card_${card_uid}.json"
-    if [ ! -f "$card_file" ]; then
+    local card_file
+    card_file=$(find_card_file "$card_uid")
+    if [ $? -ne 0 ]; then
         log "[!] Card not found: $card_uid"
         return 1
     fi
@@ -594,7 +560,8 @@ modify_card() {
     echo "1. Set custom response"
     echo "2. Add/edit label"
     echo "3. Edit raw JSON"
-    echo "4. Back to main menu"
+    echo "4. Copy to primary location"
+    echo "5. Back to main menu"
     echo
     echo -n "[?] Choose option: "
     read -r option
@@ -619,16 +586,128 @@ modify_card() {
             fi
             ;;
         3)
-            ${EDITOR:-nano} "$card_file"
-            log "[+] Card file edited"
+            if command -v nano >/dev/null 2>&1; then
+                nano "$card_file"
+                log "[+] Card file edited"
+            elif command -v vi >/dev/null 2>&1; then
+                vi "$card_file"
+                log "[+] Card file edited"
+            else
+                log "[!] No text editor available"
+                echo "[*] Install nano: pkg install nano"
+            fi
             ;;
         4)
+            if [ "$card_file" != "$PRIMARY_CARDS_DIR/card_${card_uid}.json" ]; then
+                cp "$card_file" "$PRIMARY_CARDS_DIR/card_${card_uid}.json"
+                log "[+] Card copied to primary location"
+            else
+                log "[*] Card is already in primary location"
+            fi
+            ;;
+        5)
             return 0
             ;;
         *)
             log "[!] Invalid option"
             ;;
     esac
+}
+
+delete_card() {
+    list_saved_cards
+    echo
+    echo -n "[?] Enter card UID to delete: "
+    read -r card_uid
+    
+    if [ -z "$card_uid" ]; then
+        log "[!] No UID provided"
+        return 1
+    fi
+    
+    local card_file
+    card_file=$(find_card_file "$card_uid")
+    if [ $? -ne 0 ]; then
+        log "[!] Card not found: $card_uid"
+        return 1
+    fi
+    
+    echo -n "[?] Delete card $card_uid? (y/N): "
+    read -r confirm
+    
+    if [[ $confirm =~ ^[Yy]$ ]]; then
+        rm "$card_file"
+        
+        if [ "$card_file" != "$PRIMARY_CARDS_DIR/card_${card_uid}.json" ]; then
+            rm -f "$PRIMARY_CARDS_DIR/card_${card_uid}.json" 2>/dev/null
+        fi
+        if [ "$card_file" != "$TERMUX_CARDS_DIR/card_${card_uid}.json" ]; then
+            rm -f "$TERMUX_CARDS_DIR/card_${card_uid}.json" 2>/dev/null
+        fi
+        
+        log "[+] Card deleted: $card_uid"
+    else
+        log "[*] Deletion cancelled"
+    fi
+}
+
+export_card() {
+    list_saved_cards
+    echo
+    echo -n "[?] Enter card UID to export: "
+    read -r card_uid
+    
+    if [ -z "$card_uid" ]; then
+        log "[!] No UID provided"
+        return 1
+    fi
+    
+    local card_file
+    card_file=$(find_card_file "$card_uid")
+    if [ $? -ne 0 ]; then
+        log "[!] Card not found: $card_uid"
+        return 1
+    fi
+    
+    echo -n "[?] Export filename (or press Enter for default): "
+    read -r export_name
+    
+    if [ -z "$export_name" ]; then
+        export_name="card_${card_uid}_export.json"
+    fi
+    
+    jq --arg export_time "$(date -Iseconds)" '{
+        export_info: {
+            exported_at: $export_time,
+            exported_by: "NFCman",
+            version: "2.0",
+            android_version: env.ANDROID_VERSION
+        },
+        card_data: .
+    }' "$card_file" > "$export_name"
+    
+    log "[+] Card exported to: $export_name"
+}
+
+import_card() {
+    echo -n "[?] Enter import file path: "
+    read -r import_file
+    
+    if [ ! -f "$import_file" ]; then
+        log "[!] File not found: $import_file"
+        return 1
+    fi
+    
+    local uid
+    if jq -e '.card_data' "$import_file" >/dev/null 2>&1; then
+        uid=$(jq -r '.card_data.UID' "$import_file")
+        jq '.card_data' "$import_file" > "$PRIMARY_CARDS_DIR/card_${uid}.json"
+    else
+        uid=$(jq -r '.UID' "$import_file")
+        cp "$import_file" "$PRIMARY_CARDS_DIR/card_${uid}.json"
+    fi
+    
+    log "[+] Card imported: $uid"
 }
 
 analyze_card() {
@@ -642,8 +721,9 @@ analyze_card() {
         return 1
     fi
     
-    local card_file="$CARDS_DIR/card_${card_uid}.json"
-    if [ ! -f "$card_file" ]; then
+    local card_file
+    card_file=$(find_card_file "$card_uid")
+    if [ $? -ne 0 ]; then
         log "[!] Card not found: $card_uid"
         return 1
     fi
@@ -659,6 +739,7 @@ analyze_card() {
     
     echo "Primary Technology: $type"
     echo "Read Date: $date"
+    echo "File Location: $card_file"
     echo
     
     echo "Supported Technologies:"
@@ -678,20 +759,11 @@ analyze_card() {
         echo "  Sectors: $sector_count"
         echo "  Blocks: $block_count"
         echo
-        
-        echo "Sector Data (first 32 bytes):"
-        jq -r '.MIFARE.Sectors | to_entries[] | "  \(.key): \(.value | if type == "array" then .[0][:64] + "..." else . end)"' "$card_file"
-        echo
     fi
     
     if jq -e '.ISO_DEP' "$card_file" >/dev/null 2>&1; then
         echo "ISO-DEP Information:"
         jq -r '.ISO_DEP | to_entries[] | select(.key != "AID_Responses") | "  \(.key): \(.value)"' "$card_file"
-        
-        if jq -e '.ISO_DEP.AID_Responses' "$card_file" >/dev/null 2>&1; then
-            echo "  AID Responses:"
-            jq -r '.ISO_DEP.AID_Responses | to_entries[] | "    \(.key): \(.value[:20])..."' "$card_file"
-        fi
         echo
     fi
     
@@ -700,109 +772,43 @@ analyze_card() {
     echo "═══════════════════════════════════════════════════════════════"
 }
 
-export_card() {
-    list_saved_cards
-    echo
-    echo -n "[?] Enter card UID to export: "
-    read -r card_uid
-    
-    if [ -z "$card_uid" ]; then
-        log "[!] No UID provided"
-        return 1
-    fi
-    
-    local card_file="$CARDS_DIR/card_${card_uid}.json"
-    if [ ! -f "$card_file" ]; then
-        log "[!] Card not found: $card_uid"
-        return 1
-    fi
-    
-    echo -n "[?] Export filename (or press Enter for default): "
-    read -r export_name
-    
-    if [ -z "$export_name" ]; then
-        export_name="card_${card_uid}_export.json"
-    fi
-    
-    jq --arg export_time "$(date -Iseconds)" '{
-        export_info: {
-            exported_at: $export_time,
-            exported_by: "NFCman",
-            version: "2.0"
-        },
-        card_data: .
-    }' "$card_file" > "$export_name"
-    
-    log "[+] Card exported to: $export_name"
-}
-
-import_card() {
-    echo -n "[?] Enter import file path: "
-    read -r import_file
-    
-    if [ ! -f "$import_file" ]; then
-        log "[!] File not found: $import_file"
-        return 1
-    fi
-    
-    if jq -e '.card_data' "$import_file" >/dev/null 2>&1; then
-        local uid=$(jq -r '.card_data.UID' "$import_file")
-        jq '.card_data' "$import_file" > "$CARDS_DIR/card_${uid}.json"
-    else
-        local uid=$(jq -r '.UID' "$import_file")
-        cp "$import_file" "$CARDS_DIR/card_${uid}.json"
-    fi
-    
-    log "[+] Card imported: $uid"
-}
-
-delete_card() {
-    list_saved_cards
-    echo
-    echo -n "[?] Enter card UID to delete: "
-    read -r card_uid
-    
-    if [ -z "$card_uid" ]; then
-        log "[!] No UID provided"
-        return 1
-    fi
-    
-    local card_file="$CARDS_DIR/card_${card_uid}.json"
-    if [ ! -f "$card_file" ]; then
-        log "[!] Card not found: $card_uid"
-        return 1
-    fi
-    
-    echo -n "[?] Delete card $card_uid? (y/N): "
-    read -r confirm
-    
-    if [[ $confirm =~ ^[Yy]$ ]]; then
-        rm "$card_file"
-        log "[+] Card deleted: $card_uid"
-    else
-        log "[*] Deletion cancelled"
-    fi
-}
-
 show_menu() {
     clear
     echo "════════════════════════════════════════════════════════════════"
-    echo "║                          NFCman                              ║"
+    echo "║                   NFCman (Android $ANDROID_VERSION)                        ║"
     echo "════════════════════════════════════════════════════════════════"
     echo "║  1. Launch NFC Reader App  │  6. Analyze Card                ║"
     echo "║  2. List Saved Cards       │  7. Export Card                 ║"
     echo "║  3. Emulate NFC Card       │  8. Import Card                 ║"
-    echo "║  4. Deploy Custom Firmware │  9. Delete Card                 ║"
-    echo "║  5. Modify Card Data       │  0. Check System Status         ║"
-    echo "║                            │  q. Exit                        ║"
+    echo "║  4. Modify Card Data       │  9. Delete Card                 ║"
+    echo "║  5. Check System Status    │  q. Exit                        ║"
     echo "════════════════════════════════════════════════════════════════"
     echo
     echo -n "[?] Choose option: "
 }
 
 main() {
+    load_configuration
+    
     if ! check_android_app; then
-        echo "Install the Android NFC Clone app first, then run this script."
+        echo ""
+        echo "════════════════════════════════════════════════════════════════"
+        echo "                        SETUP REQUIRED"
+        echo "════════════════════════════════════════════════════════════════"
+        echo ""
+        echo "Android $ANDROID_VERSION Setup Instructions:"
+        if [ "$REQUIRE_APP_INITIALIZATION" = "true" ]; then
+            echo "1. Build and install the NFC Clone APK"
+            echo "2. Launch the app once to initialize directories"
+            echo "3. Grant any requested permissions"
+            echo "4. Return to this script"
+            echo ""
+            echo "The app must create its directories before this script can work."
+        else
+            echo "1. Build and install the NFC Clone APK"
+            echo "2. Run this script again"
+        fi
+        echo "════════════════════════════════════════════════════════════════"
         exit 1
     fi
     
@@ -815,13 +821,12 @@ main() {
             1) read_card ;;
             2) list_saved_cards ;;
             3) emulate_card ;;
-            4) deploy_custom_firmware ;;
-            5) modify_card ;;
+            4) modify_card ;;
+            5) check_system_status ;;
             6) analyze_card ;;
             7) export_card ;;
             8) import_card ;;
             9) delete_card ;;
-            0) check_firmware_status ;;
             q|Q) exit 0 ;;
             *) log "[!] Invalid option" ;;
         esac
