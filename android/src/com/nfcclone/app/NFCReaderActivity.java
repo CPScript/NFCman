@@ -2,9 +2,11 @@ package com.nfcclone.app;
 
 import android.app.Activity;
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.nfc.NfcAdapter;
+import android.nfc.NfcManager;
 import android.nfc.Tag;
 import android.nfc.tech.IsoDep;
 import android.nfc.tech.MifareClassic;
@@ -15,7 +17,9 @@ import android.nfc.tech.NfcA;
 import android.nfc.tech.NfcB;
 import android.nfc.tech.NfcF;
 import android.nfc.tech.NfcV;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.util.Log;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -35,278 +39,457 @@ public class NFCReaderActivity extends Activity {
     private String[][] techListsArray;
     private TextView statusText;
     
-    private static final String CARDS_DIR = "/storage/emulated/0/Android/data/com.nfcclone.app/files/cards";
-    
+    private File cardsDir;
+    private boolean nfcSetupComplete = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_reader);
         
-        statusText = findViewById(R.id.status_text);
-        statusText.setText("Ready to read NFC cards\nPlace card on device...");
-        
-        nfcAdapter = NfcAdapter.getDefaultAdapter(this);
-        
-        if (nfcAdapter == null || !nfcAdapter.isEnabled()) {
-            Toast.makeText(this, "NFC not available or disabled", Toast.LENGTH_LONG).show();
-            finish();
-            return;
+        try {
+            setContentView(R.layout.activity_reader);
+            
+            statusText = findViewById(R.id.status_text);
+            updateStatus("Initializing NFC reader...");
+            
+            initializeNFC();
+            setupCardsDirectory();
+            setupNFCReading();
+            
+            updateStatus("Ready to read NFC cards\nPlace card on device...");
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error in onCreate", e);
+            updateStatus("Initialization error: " + e.getMessage());
+            handleFatalError(e);
         }
-        
-        setupNFCReading();
-        createCardsDirectory();
+    }
+    
+    private void initializeNFC() throws Exception {
+        try {
+            NfcManager nfcManager = (NfcManager) getSystemService(Context.NFC_SERVICE);
+            if (nfcManager == null) {
+                throw new Exception("NFC Manager not available");
+            }
+            
+            nfcAdapter = nfcManager.getDefaultAdapter();
+            if (nfcAdapter == null) {
+                throw new Exception("NFC not available on this device");
+            }
+            
+            if (!nfcAdapter.isEnabled()) {
+                throw new Exception("NFC is disabled. Please enable NFC in Settings.");
+            }
+            
+            Log.d(TAG, "NFC initialized successfully");
+            
+        } catch (Exception e) {
+            Log.e(TAG, "NFC initialization failed", e);
+            throw new Exception("NFC initialization failed: " + e.getMessage());
+        }
+    }
+    
+    private void setupCardsDirectory() {
+        try {
+            File internalCardsDir = new File(getFilesDir(), "cards");
+            if (!internalCardsDir.exists()) {
+                internalCardsDir.mkdirs();
+            }
+            cardsDir = internalCardsDir;
+            
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                try {
+                    File externalCardsDir = new File("/storage/emulated/0/Android/data/" + getPackageName() + "/files/cards");
+                    if (externalCardsDir.exists() || externalCardsDir.mkdirs()) {
+                        cardsDir = externalCardsDir;
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Could not create external cards directory", e);
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+                try {
+                    File documentsCardsDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "NFCClone/cards");
+                    if (documentsCardsDir.exists() || documentsCardsDir.mkdirs()) {
+                        cardsDir = documentsCardsDir;
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Could not create documents cards directory", e);
+                }
+            }
+            
+            Log.d(TAG, "Cards directory: " + cardsDir.getAbsolutePath());
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting up cards directory", e);
+            cardsDir = new File(getFilesDir(), "cards");
+            cardsDir.mkdirs();
+        }
     }
     
     private void setupNFCReading() {
-        pendingIntent = PendingIntent.getActivity(
-            this, 0, new Intent(this, getClass()).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), 0);
-        
-        IntentFilter ndef = new IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED);
-        IntentFilter tech = new IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED);
-        IntentFilter tag = new IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED);
-        
         try {
-            ndef.addDataType("*/*");
-        } catch (IntentFilter.MalformedMimeTypeException e) {
-            throw new RuntimeException("Failed to add MIME type.", e);
-        }
-        
-        intentFiltersArray = new IntentFilter[]{ndef, tech, tag};
-        
-        techListsArray = new String[][]{
-            new String[]{NfcA.class.getName()},
-            new String[]{NfcB.class.getName()},
-            new String[]{NfcF.class.getName()},
-            new String[]{NfcV.class.getName()},
-            new String[]{IsoDep.class.getName()},
-            new String[]{MifareClassic.class.getName()},
-            new String[]{MifareUltralight.class.getName()},
-            new String[]{Ndef.class.getName()},
-            new String[]{NdefFormatable.class.getName()}
-        };
-    }
-    
-    private void createCardsDirectory() {
-        File cardsDir = new File(CARDS_DIR);
-        if (!cardsDir.exists()) {
-            cardsDir.mkdirs();
+            int flags = 0;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                flags = PendingIntent.FLAG_MUTABLE;
+            } else {
+                flags = 0;
+            }
+            
+            pendingIntent = PendingIntent.getActivity(
+                this, 0, 
+                new Intent(this, getClass()).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), 
+                flags);
+            
+            IntentFilter ndef = new IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED);
+            IntentFilter tech = new IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED);
+            IntentFilter tag = new IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED);
+            
+            try {
+                ndef.addDataType("*/*");
+            } catch (IntentFilter.MalformedMimeTypeException e) {
+                Log.e(TAG, "Failed to add MIME type", e);
+                throw new RuntimeException("Failed to add MIME type.", e);
+            }
+            
+            intentFiltersArray = new IntentFilter[]{ndef, tech, tag};
+            
+            techListsArray = new String[][]{
+                new String[]{NfcA.class.getName()},
+                new String[]{NfcB.class.getName()},
+                new String[]{NfcF.class.getName()},
+                new String[]{NfcV.class.getName()},
+                new String[]{IsoDep.class.getName()},
+                new String[]{MifareClassic.class.getName()},
+                new String[]{MifareUltralight.class.getName()},
+                new String[]{Ndef.class.getName()},
+                new String[]{NdefFormatable.class.getName()}
+            };
+            
+            nfcSetupComplete = true;
+            Log.d(TAG, "NFC reading setup complete");
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting up NFC reading", e);
+            updateStatus("NFC setup error: " + e.getMessage());
         }
     }
     
     @Override
     protected void onResume() {
         super.onResume();
-        nfcAdapter.enableForegroundDispatch(this, pendingIntent, intentFiltersArray, techListsArray);
+        
+        try {
+            if (nfcAdapter != null && nfcSetupComplete) {
+                try {
+                    nfcAdapter.enableForegroundDispatch(this, pendingIntent, intentFiltersArray, techListsArray);
+                    Log.d(TAG, "NFC foreground dispatch enabled");
+                } catch (Exception e) {
+                    Log.e(TAG, "Error enabling foreground dispatch", e);
+                    updateStatus("Error enabling NFC: " + e.getMessage());
+                }
+            } else {
+                updateStatus("NFC not properly initialized");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in onResume", e);
+        }
     }
     
     @Override
     protected void onPause() {
         super.onPause();
-        nfcAdapter.disableForegroundDispatch(this);
+        
+        try {
+            if (nfcAdapter != null) {
+                try {
+                    nfcAdapter.disableForegroundDispatch(this);
+                    Log.d(TAG, "NFC foreground dispatch disabled");
+                } catch (Exception e) {
+                    Log.e(TAG, "Error disabling foreground dispatch", e);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in onPause", e);
+        }
     }
     
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        handleNFCIntent(intent);
+        
+        try {
+            Log.d(TAG, "New intent received: " + intent.getAction());
+            handleNFCIntent(intent);
+        } catch (Exception e) {
+            Log.e(TAG, "Error handling new intent", e);
+            updateStatus("Error processing NFC: " + e.getMessage());
+        }
     }
     
     private void handleNFCIntent(Intent intent) {
-        String action = intent.getAction();
-        if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action) ||
-            NfcAdapter.ACTION_TECH_DISCOVERED.equals(action) ||
-            NfcAdapter.ACTION_TAG_DISCOVERED.equals(action)) {
+        try {
+            String action = intent.getAction();
+            Log.d(TAG, "Handling NFC intent: " + action);
             
-            Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
-            processTag(tag);
+            if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action) ||
+                NfcAdapter.ACTION_TECH_DISCOVERED.equals(action) ||
+                NfcAdapter.ACTION_TAG_DISCOVERED.equals(action)) {
+                
+                Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
+                if (tag != null) {
+                    processTag(tag);
+                } else {
+                    Log.w(TAG, "No tag found in intent");
+                    updateStatus("No NFC tag detected");
+                }
+            } else {
+                Log.w(TAG, "Unhandled intent action: " + action);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error handling NFC intent", e);
+            updateStatus("Error processing NFC intent: " + e.getMessage());
         }
     }
     
     private void processTag(Tag tag) {
-        if (tag == null) return;
+        if (tag == null) {
+            updateStatus("Invalid tag");
+            return;
+        }
         
         try {
             JSONObject cardData = new JSONObject();
             byte[] uid = tag.getId();
             String uidHex = bytesToHex(uid);
             
+            Log.d(TAG, "Processing tag with UID: " + uidHex);
+            updateStatus("Reading card: " + uidHex);
+            
             cardData.put("UID", uidHex);
             cardData.put("Timestamp", System.currentTimeMillis() / 1000);
             cardData.put("Technologies", new JSONArray(Arrays.asList(tag.getTechList())));
+            cardData.put("AndroidVersion", Build.VERSION.SDK_INT);
+            cardData.put("DeviceModel", Build.MODEL);
             
-            statusText.setText("Reading card: " + uidHex);
+            boolean hasData = false;
             
-            // Read NDEF data
-            readNdefData(tag, cardData);
+            try {
+                if (readNdefData(tag, cardData)) hasData = true;
+            } catch (Exception e) {
+                Log.w(TAG, "Error reading NDEF data", e);
+                cardData.put("NDEF_Error", e.getMessage());
+            }
             
-            // Read MIFARE data
-            readMifareData(tag, cardData);
+            try {
+                if (readMifareData(tag, cardData)) hasData = true;
+            } catch (Exception e) {
+                Log.w(TAG, "Error reading MIFARE data", e);
+                cardData.put("MIFARE_Error", e.getMessage());
+            }
             
-            // Read ISO-DEP data
-            readIsoDepData(tag, cardData);
+            try {
+                if (readIsoDepData(tag, cardData)) hasData = true;
+            } catch (Exception e) {
+                Log.w(TAG, "Error reading ISO-DEP data", e);
+                cardData.put("ISO_DEP_Error", e.getMessage());
+            }
             
-            // Read NFC-A data
-            readNfcAData(tag, cardData);
+            try {
+                if (readNfcAData(tag, cardData)) hasData = true;
+            } catch (Exception e) {
+                Log.w(TAG, "Error reading NFC-A data", e);
+                cardData.put("NFC_A_Error", e.getMessage());
+            }
             
-            // Save card data
             saveCardData(uidHex, cardData);
             
-            statusText.setText("Card saved: " + uidHex + "\nPlace another card or press back");
+            updateStatus("Card saved: " + uidHex + "\nPlace another card or press back");
             Toast.makeText(this, "Card " + uidHex + " saved successfully", Toast.LENGTH_SHORT).show();
             
         } catch (Exception e) {
             Log.e(TAG, "Error processing tag", e);
-            statusText.setText("Error reading card: " + e.getMessage());
+            updateStatus("Error reading card: " + e.getMessage());
+            Toast.makeText(this, "Error reading card: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
     
-    private void readNdefData(Tag tag, JSONObject cardData) {
+    private boolean readNdefData(Tag tag, JSONObject cardData) {
         try {
             Ndef ndef = Ndef.get(tag);
-            if (ndef != null) {
-                ndef.connect();
-                
-                JSONObject ndefData = new JSONObject();
-                ndefData.put("Type", ndef.getType());
-                ndefData.put("MaxSize", ndef.getMaxSize());
-                ndefData.put("IsWritable", ndef.isWritable());
-                
-                if (ndef.getNdefMessage() != null) {
-                    ndefData.put("Message", bytesToHex(ndef.getNdefMessage().toByteArray()));
-                }
-                
-                cardData.put("NDEF", ndefData);
-                ndef.close();
+            if (ndef == null) return false;
+            
+            ndef.connect();
+            
+            JSONObject ndefData = new JSONObject();
+            ndefData.put("Type", ndef.getType());
+            ndefData.put("MaxSize", ndef.getMaxSize());
+            ndefData.put("IsWritable", ndef.isWritable());
+            
+            if (ndef.getNdefMessage() != null) {
+                ndefData.put("Message", bytesToHex(ndef.getNdefMessage().toByteArray()));
             }
+            
+            cardData.put("NDEF", ndefData);
+            ndef.close();
+            return true;
+            
         } catch (Exception e) {
             Log.e(TAG, "Error reading NDEF data", e);
+            return false;
         }
     }
     
-    private void readMifareData(Tag tag, JSONObject cardData) {
+    private boolean readMifareData(Tag tag, JSONObject cardData) {
         try {
             MifareClassic mifare = MifareClassic.get(tag);
-            if (mifare != null) {
-                mifare.connect();
-                
-                JSONObject mifareData = new JSONObject();
-                mifareData.put("Type", mifare.getType());
-                mifareData.put("SectorCount", mifare.getSectorCount());
-                mifareData.put("BlockCount", mifare.getBlockCount());
-                mifareData.put("Size", mifare.getSize());
-                
-                JSONObject sectorsData = new JSONObject();
-                
-                for (int sector = 0; sector < mifare.getSectorCount(); sector++) {
-                    try {
-                        // Try default keys
-                        boolean authenticated = mifare.authenticateSectorWithKeyA(sector, MifareClassic.KEY_DEFAULT) ||
-                                              mifare.authenticateSectorWithKeyB(sector, MifareClassic.KEY_DEFAULT) ||
-                                              mifare.authenticateSectorWithKeyA(sector, MifareClassic.KEY_MIFARE_APPLICATION_DIRECTORY) ||
-                                              mifare.authenticateSectorWithKeyB(sector, MifareClassic.KEY_MIFARE_APPLICATION_DIRECTORY);
+            if (mifare == null) return false;
+            
+            mifare.connect();
+            
+            JSONObject mifareData = new JSONObject();
+            mifareData.put("Type", mifare.getType());
+            mifareData.put("SectorCount", mifare.getSectorCount());
+            mifareData.put("BlockCount", mifare.getBlockCount());
+            mifareData.put("Size", mifare.getSize());
+            
+            JSONObject sectorsData = new JSONObject();
+            
+            byte[][] defaultKeys = {
+                MifareClassic.KEY_DEFAULT,
+                MifareClassic.KEY_MIFARE_APPLICATION_DIRECTORY,
+                {(byte)0xFF, (byte)0xFF, (byte)0xFF, (byte)0xFF, (byte)0xFF, (byte)0xFF},
+                {(byte)0xA0, (byte)0xA1, (byte)0xA2, (byte)0xA3, (byte)0xA4, (byte)0xA5},
+                {(byte)0xD3, (byte)0xF7, (byte)0xD3, (byte)0xF7, (byte)0xD3, (byte)0xF7}
+            };
+            
+            for (int sector = 0; sector < mifare.getSectorCount(); sector++) {
+                try {
+                    boolean authenticated = false;
+                    
+                    for (byte[] key : defaultKeys) {
+                        if (mifare.authenticateSectorWithKeyA(sector, key) || 
+                            mifare.authenticateSectorWithKeyB(sector, key)) {
+                            authenticated = true;
+                            break;
+                        }
+                    }
+                    
+                    if (authenticated) {
+                        JSONArray blocks = new JSONArray();
+                        int startBlock = mifare.sectorToBlock(sector);
+                        int blockCount = mifare.getBlockCountInSector(sector);
                         
-                        if (authenticated) {
-                            JSONArray blocks = new JSONArray();
-                            int startBlock = mifare.sectorToBlock(sector);
-                            int blockCount = mifare.getBlockCountInSector(sector);
-                            
-                            for (int block = 0; block < blockCount; block++) {
+                        for (int block = 0; block < blockCount; block++) {
+                            try {
                                 byte[] blockData = mifare.readBlock(startBlock + block);
                                 blocks.put(bytesToHex(blockData));
+                            } catch (Exception e) {
+                                blocks.put("Read error: " + e.getMessage());
                             }
-                            sectorsData.put("sector_" + sector, blocks);
-                        } else {
-                            sectorsData.put("sector_" + sector, "Authentication failed");
                         }
-                    } catch (Exception e) {
-                        sectorsData.put("sector_" + sector, "Error: " + e.getMessage());
+                        sectorsData.put("sector_" + sector, blocks);
+                    } else {
+                        sectorsData.put("sector_" + sector, "Authentication failed");
                     }
+                } catch (Exception e) {
+                    sectorsData.put("sector_" + sector, "Error: " + e.getMessage());
                 }
-                
-                mifareData.put("Sectors", sectorsData);
-                cardData.put("MIFARE", mifareData);
-                mifare.close();
             }
+            
+            mifareData.put("Sectors", sectorsData);
+            cardData.put("MIFARE", mifareData);
+            mifare.close();
+            return true;
+            
         } catch (Exception e) {
             Log.e(TAG, "Error reading MIFARE data", e);
+            return false;
         }
     }
     
-    private void readIsoDepData(Tag tag, JSONObject cardData) {
+    private boolean readIsoDepData(Tag tag, JSONObject cardData) {
         try {
             IsoDep isoDep = IsoDep.get(tag);
-            if (isoDep != null) {
-                isoDep.connect();
-                
-                JSONObject isoData = new JSONObject();
-                isoData.put("MaxTransceiveLength", isoDep.getMaxTransceiveLength());
+            if (isoDep == null) return false;
+            
+            isoDep.connect();
+            
+            JSONObject isoData = new JSONObject();
+            isoData.put("MaxTransceiveLength", isoDep.getMaxTransceiveLength());
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 isoData.put("IsExtendedLengthApduSupported", isoDep.isExtendedLengthApduSupported());
-                
-                // Try to select common AIDs
-                String[] commonAids = {
-                    "A000000172950001", // EMV
-                    "A0000001510000",   // VISA
-                    "A000000025010801", // MasterCard
-                    "F001020304050607"  // Custom test AID
-                };
-                
-                JSONObject aidResponses = new JSONObject();
-                for (String aid : commonAids) {
-                    try {
-                        byte[] selectCommand = buildSelectCommand(hexToBytes(aid));
-                        byte[] response = isoDep.transceive(selectCommand);
-                        aidResponses.put(aid, bytesToHex(response));
-                    } catch (Exception e) {
-                        aidResponses.put(aid, "Error: " + e.getMessage());
-                    }
-                }
-                
-                isoData.put("AID_Responses", aidResponses);
-                cardData.put("ISO_DEP", isoData);
-                isoDep.close();
             }
+            
+            String[] commonAids = {
+                "A000000172950001",
+                "A0000001510000",
+                "A000000025010801",
+                "F001020304050607"
+            };
+            
+            JSONObject aidResponses = new JSONObject();
+            for (String aid : commonAids) {
+                try {
+                    byte[] selectCommand = buildSelectCommand(hexToBytes(aid));
+                    byte[] response = isoDep.transceive(selectCommand);
+                    aidResponses.put(aid, bytesToHex(response));
+                } catch (Exception e) {
+                    aidResponses.put(aid, "Error: " + e.getMessage());
+                }
+            }
+            
+            isoData.put("AID_Responses", aidResponses);
+            cardData.put("ISO_DEP", isoData);
+            isoDep.close();
+            return true;
+            
         } catch (Exception e) {
             Log.e(TAG, "Error reading ISO-DEP data", e);
+            return false;
         }
     }
     
-    private void readNfcAData(Tag tag, JSONObject cardData) {
+    private boolean readNfcAData(Tag tag, JSONObject cardData) {
         try {
             NfcA nfcA = NfcA.get(tag);
-            if (nfcA != null) {
-                nfcA.connect();
-                
-                JSONObject nfcAData = new JSONObject();
-                nfcAData.put("ATQA", bytesToHex(nfcA.getAtqa()));
-                nfcAData.put("SAK", nfcA.getSak());
-                nfcAData.put("MaxTransceiveLength", nfcA.getMaxTransceiveLength());
-                
-                cardData.put("NFC_A", nfcAData);
-                nfcA.close();
-            }
+            if (nfcA == null) return false;
+            
+            nfcA.connect();
+            
+            JSONObject nfcAData = new JSONObject();
+            nfcAData.put("ATQA", bytesToHex(nfcA.getAtqa()));
+            nfcAData.put("SAK", nfcA.getSak());
+            nfcAData.put("MaxTransceiveLength", nfcA.getMaxTransceiveLength());
+            
+            cardData.put("NFC_A", nfcAData);
+            nfcA.close();
+            return true;
+            
         } catch (Exception e) {
             Log.e(TAG, "Error reading NFC-A data", e);
+            return false;
         }
     }
     
     private byte[] buildSelectCommand(byte[] aid) {
         byte[] command = new byte[6 + aid.length];
-        command[0] = (byte) 0x00; // CLA
-        command[1] = (byte) 0xA4; // INS
-        command[2] = (byte) 0x04; // P1
-        command[3] = (byte) 0x00; // P2
-        command[4] = (byte) aid.length; // Lc
+        command[0] = (byte) 0x00;
+        command[1] = (byte) 0xA4;
+        command[2] = (byte) 0x04;
+        command[3] = (byte) 0x00;
+        command[4] = (byte) aid.length;
         System.arraycopy(aid, 0, command, 5, aid.length);
-        command[5 + aid.length] = (byte) 0x00; // Le
+        command[5 + aid.length] = (byte) 0x00;
         return command;
     }
     
     private void saveCardData(String uid, JSONObject cardData) throws IOException, JSONException {
-        File cardFile = new File(CARDS_DIR, "card_" + uid + ".json");
+        File cardFile = new File(cardsDir, "card_" + uid + ".json");
         
-        // Add default emulation response
         cardData.put("custom_response", "9000");
         cardData.put("label", "");
+        cardData.put("saved_location", cardFile.getAbsolutePath());
         
         FileWriter writer = new FileWriter(cardFile);
         writer.write(cardData.toString(4));
@@ -316,6 +499,8 @@ public class NFCReaderActivity extends Activity {
     }
     
     private String bytesToHex(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return "";
+        
         StringBuilder sb = new StringBuilder();
         for (byte b : bytes) {
             sb.append(String.format("%02X", b));
@@ -324,6 +509,8 @@ public class NFCReaderActivity extends Activity {
     }
     
     private byte[] hexToBytes(String hex) {
+        if (hex == null || hex.length() == 0) return new byte[0];
+        
         int len = hex.length();
         byte[] data = new byte[len / 2];
         for (int i = 0; i < len; i += 2) {
@@ -331,5 +518,30 @@ public class NFCReaderActivity extends Activity {
                                  + Character.digit(hex.charAt(i+1), 16));
         }
         return data;
+    }
+    
+    private void updateStatus(String message) {
+        if (statusText != null) {
+            statusText.setText(message);
+        }
+        Log.d(TAG, "Status: " + message);
+    }
+    
+    private void handleFatalError(Exception e) {
+        Log.e(TAG, "Fatal error", e);
+        Toast.makeText(this, "Fatal error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        
+        try {
+            if (nfcAdapter != null) {
+                nfcAdapter.disableForegroundDispatch(this);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in onDestroy", e);
+        }
     }
 }
