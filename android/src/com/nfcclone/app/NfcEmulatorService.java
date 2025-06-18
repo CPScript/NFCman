@@ -1,31 +1,34 @@
 package com.nfcclone.app;
 
-import android.content.SharedPreferences;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
 import android.nfc.cardemulation.HostApduService;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
-import java.util.Arrays;
+import androidx.core.app.NotificationCompat;
+import org.json.JSONException;
+import org.json.JSONObject;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import org.json.JSONException;
-import org.json.JSONObject;
+import java.util.Arrays;
 
 public class NfcEmulatorService extends HostApduService {
     private static final String TAG = "NfcEmulatorService";
+    private static final String NOTIFICATION_CHANNEL_ID = "nfc_emulation_channel";
+    private static final int FOREGROUND_NOTIFICATION_ID = 1001;
     
-    // Standard APDU response codes
     private static final byte[] SUCCESS_SW = {(byte) 0x90, (byte) 0x00};
     private static final byte[] FILE_NOT_FOUND_SW = {(byte) 0x6A, (byte) 0x82};
     private static final byte[] WRONG_LENGTH_SW = {(byte) 0x67, (byte) 0x00};
     private static final byte[] INSTRUCTION_NOT_SUPPORTED_SW = {(byte) 0x6D, (byte) 0x00};
     private static final byte[] CLASS_NOT_SUPPORTED_SW = {(byte) 0x6E, (byte) 0x00};
     
-    // Configuration paths
-    private static final String CONFIG_PATH = "/storage/emulated/0/Android/data/com.nfcclone.app/files/emulation_config.json";
-    private static final String CARDS_DIR = "/storage/emulated/0/Android/data/com.nfcclone.app/files/cards";
-    
-    // Emulation state
     private byte[] emulatedUid = null;
     private byte[] customResponse = null;
     private String currentCardUid = null;
@@ -36,11 +39,30 @@ public class NfcEmulatorService extends HostApduService {
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "NFC Emulator Service Created");
+        
+        createNotificationChannel();
         loadEmulationConfiguration();
     }
     
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "NFC Emulation",
+                NotificationManager.IMPORTANCE_LOW
+            );
+            channel.setDescription("NFC card emulation status");
+            channel.setShowBadge(false);
+            
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager != null) {
+                manager.createNotificationChannel(channel);
+            }
+        }
+    }
+    
     @Override
-    public int onStartCommand(android.content.Intent intent, int flags, int startId) {
+    public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "Service started with intent: " + intent);
         
         if (intent != null) {
@@ -54,7 +76,6 @@ public class NfcEmulatorService extends HostApduService {
             }
         }
         
-        // Check for configuration changes
         loadEmulationConfiguration();
         
         return START_STICKY;
@@ -62,8 +83,21 @@ public class NfcEmulatorService extends HostApduService {
     
     private void loadEmulationConfiguration() {
         try {
-            File configFile = new File(CONFIG_PATH);
-            if (!configFile.exists()) {
+            File[] possibleConfigFiles = {
+                new File(getFilesDir().getParentFile(), "files/emulation_config.json"),
+                new File("/storage/emulated/0/Android/data/" + getPackageName() + "/files/emulation_config.json"),
+                new File(getFilesDir(), "emulation_config.json")
+            };
+            
+            File configFile = null;
+            for (File file : possibleConfigFiles) {
+                if (file.exists()) {
+                    configFile = file;
+                    break;
+                }
+            }
+            
+            if (configFile == null || !configFile.exists()) {
                 Log.d(TAG, "No emulation configuration found");
                 stopEmulation();
                 return;
@@ -96,9 +130,21 @@ public class NfcEmulatorService extends HostApduService {
     
     private void startEmulation(String cardUid) {
         try {
-            File cardFile = new File(CARDS_DIR, "card_" + cardUid + ".json");
-            if (!cardFile.exists()) {
-                Log.e(TAG, "Card file not found: " + cardFile.getAbsolutePath());
+            File[] possibleCardFiles = {
+                new File(getFilesDir(), "cards/card_" + cardUid + ".json"),
+                new File("/storage/emulated/0/Android/data/" + getPackageName() + "/files/cards/card_" + cardUid + ".json")
+            };
+            
+            File cardFile = null;
+            for (File file : possibleCardFiles) {
+                if (file.exists()) {
+                    cardFile = file;
+                    break;
+                }
+            }
+            
+            if (cardFile == null || !cardFile.exists()) {
+                Log.e(TAG, "Card file not found for UID: " + cardUid);
                 return;
             }
             
@@ -113,7 +159,6 @@ public class NfcEmulatorService extends HostApduService {
             String uidString = cardData.getString("UID");
             emulatedUid = hexStringToByteArray(uidString);
             
-            // Load custom response if available
             customResponse = null;
             if (cardData.has("custom_response")) {
                 String responseHex = cardData.getString("custom_response");
@@ -125,6 +170,8 @@ public class NfcEmulatorService extends HostApduService {
             currentCardUid = cardUid;
             emulationActive = true;
             
+            startForegroundService();
+            
             Log.d(TAG, "Started emulating card: " + uidString);
             Log.d(TAG, "Custom response: " + (customResponse != null ? bytesToHex(customResponse) : "None"));
             
@@ -134,12 +181,37 @@ public class NfcEmulatorService extends HostApduService {
         }
     }
     
+    private void startForegroundService() {
+        Intent notificationIntent = new Intent(this, MainActivity.class);
+        
+        int flags = 0;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            flags = PendingIntent.FLAG_IMMUTABLE;
+        }
+        
+        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, flags);
+        
+        Notification notification = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setContentTitle("NFC Emulation Active")
+            .setContentText("Emulating card: " + (currentCardUid != null ? currentCardUid : "Unknown"))
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build();
+        
+        startForeground(FOREGROUND_NOTIFICATION_ID, notification);
+    }
+    
     private void stopEmulation() {
         emulatedUid = null;
         customResponse = null;
         currentCardUid = null;
         cardData = null;
         emulationActive = false;
+        
+        stopForeground(true);
+        
         Log.d(TAG, "Emulation stopped");
     }
     
@@ -147,13 +219,11 @@ public class NfcEmulatorService extends HostApduService {
     public byte[] processCommandApdu(byte[] commandApdu, Bundle extras) {
         Log.d(TAG, "Received APDU: " + bytesToHex(commandApdu));
         
-        // Check if emulation is active
         if (!emulationActive || emulatedUid == null) {
             Log.e(TAG, "No active emulation");
             return FILE_NOT_FOUND_SW;
         }
         
-        // Validate minimum APDU length
         if (commandApdu.length < 4) {
             Log.e(TAG, "APDU too short");
             return WRONG_LENGTH_SW;
@@ -166,36 +236,36 @@ public class NfcEmulatorService extends HostApduService {
         
         Log.d(TAG, String.format("CLA: %02X, INS: %02X, P1: %02X, P2: %02X", cla, ins, p1, p2));
         
-        // Handle SELECT command (00 A4)
-        if (cla == (byte) 0x00 && ins == (byte) 0xA4) {
-            return handleSelectCommand(commandApdu);
+        try {
+            if (cla == (byte) 0x00 && ins == (byte) 0xA4) {
+                return handleSelectCommand(commandApdu);
+            }
+            
+            if (cla == (byte) 0xFF && ins == (byte) 0xCA) {
+                return handleGetUidCommand(p1, p2);
+            }
+            
+            if (cla == (byte) 0x00 && ins == (byte) 0xB0) {
+                return handleReadBinaryCommand(p1, p2, commandApdu);
+            }
+            
+            byte[] specificResponse = handleCardSpecificCommands(commandApdu);
+            if (specificResponse != null) {
+                return specificResponse;
+            }
+            
+            if (customResponse != null && customResponse.length > 0) {
+                Log.d(TAG, "Using configured custom response");
+                return customResponse;
+            }
+            
+            Log.d(TAG, "Returning default success response");
+            return SUCCESS_SW;
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error processing APDU", e);
+            return FILE_NOT_FOUND_SW;
         }
-        
-        // Handle GET UID command (FF CA)
-        if (cla == (byte) 0xFF && ins == (byte) 0xCA) {
-            return handleGetUidCommand(p1, p2);
-        }
-        
-        // Handle READ BINARY command (00 B0)
-        if (cla == (byte) 0x00 && ins == (byte) 0xB0) {
-            return handleReadBinaryCommand(p1, p2, commandApdu);
-        }
-        
-        // Handle custom responses for specific card types
-        byte[] specificResponse = handleCardSpecificCommands(commandApdu);
-        if (specificResponse != null) {
-            return specificResponse;
-        }
-        
-        // Use custom response if configured
-        if (customResponse != null && customResponse.length > 0) {
-            Log.d(TAG, "Using configured custom response");
-            return customResponse;
-        }
-        
-        // Default success response
-        Log.d(TAG, "Returning default success response");
-        return SUCCESS_SW;
     }
     
     private byte[] handleSelectCommand(byte[] commandApdu) {
@@ -213,13 +283,11 @@ public class NfcEmulatorService extends HostApduService {
             return WRONG_LENGTH_SW;
         }
         
-        // Extract AID
         byte[] aid = new byte[lc];
         System.arraycopy(commandApdu, 5, aid, 0, lc);
         
         Log.d(TAG, "SELECT AID: " + bytesToHex(aid));
         
-        // For file selection by AID, return success
         if (p1 == (byte) 0x04 && p2 == (byte) 0x00) {
             Log.d(TAG, "AID selection successful");
             return SUCCESS_SW;
@@ -231,7 +299,6 @@ public class NfcEmulatorService extends HostApduService {
     private byte[] handleGetUidCommand(byte p1, byte p2) {
         Log.d(TAG, "Processing GET UID command");
         
-        // Standard GET UID command parameters
         if (p1 == (byte) 0x00 && p2 == (byte) 0x00) {
             byte[] response = new byte[emulatedUid.length + 2];
             System.arraycopy(emulatedUid, 0, response, 0, emulatedUid.length);
@@ -253,12 +320,11 @@ public class NfcEmulatorService extends HostApduService {
         if (commandApdu.length == 5) {
             length = commandApdu[4] & 0xFF;
         } else if (commandApdu.length == 4) {
-            length = 256; // Maximum length when Le is absent
+            length = 256;
         }
         
         Log.d(TAG, String.format("READ BINARY - Offset: %d, Length: %d", offset, length));
         
-        // Return UID data if offset is 0
         if (offset == 0 && emulatedUid != null) {
             int responseLength = Math.min(length, emulatedUid.length);
             byte[] response = new byte[responseLength + 2];
@@ -276,17 +342,14 @@ public class NfcEmulatorService extends HostApduService {
         }
         
         try {
-            // Check if this is a MIFARE card
             if (cardData.has("MIFARE")) {
                 return handleMifareCommands(commandApdu);
             }
             
-            // Check if this is an ISO-DEP card
             if (cardData.has("ISO_DEP")) {
                 return handleIsoDepCommands(commandApdu);
             }
             
-            // Handle NDEF operations
             if (cardData.has("NDEF")) {
                 return handleNdefCommands(commandApdu);
             }
@@ -299,10 +362,8 @@ public class NfcEmulatorService extends HostApduService {
     }
     
     private byte[] handleMifareCommands(byte[] commandApdu) {
-        // Handle MIFARE-specific authentication and read commands
         Log.d(TAG, "Processing MIFARE-specific command");
         
-        // For MIFARE authentication commands, return success
         if (commandApdu.length >= 2 && 
             (commandApdu[1] == (byte) 0x60 || commandApdu[1] == (byte) 0x61)) {
             Log.d(TAG, "MIFARE authentication command");
@@ -313,17 +374,14 @@ public class NfcEmulatorService extends HostApduService {
     }
     
     private byte[] handleIsoDepCommands(byte[] commandApdu) {
-        // Handle ISO-DEP specific commands based on stored responses
         try {
             JSONObject isoData = cardData.getJSONObject("ISO_DEP");
             if (isoData.has("AID_Responses")) {
                 JSONObject aidResponses = isoData.getJSONObject("AID_Responses");
                 
-                // If this is a SELECT command, check if we have a stored response
                 if (commandApdu.length >= 2 && 
                     commandApdu[0] == (byte) 0x00 && commandApdu[1] == (byte) 0xA4) {
                     
-                    // Extract AID and look for stored response
                     if (commandApdu.length >= 6) {
                         int lc = commandApdu[4] & 0xFF;
                         if (commandApdu.length >= 5 + lc) {
@@ -349,13 +407,11 @@ public class NfcEmulatorService extends HostApduService {
     }
     
     private byte[] handleNdefCommands(byte[] commandApdu) {
-        // Handle NDEF-related operations
         Log.d(TAG, "Processing NDEF command");
         
         try {
             JSONObject ndefData = cardData.getJSONObject("NDEF");
             
-            // For NDEF SELECT commands
             if (commandApdu.length >= 2 && 
                 commandApdu[0] == (byte) 0x00 && commandApdu[1] == (byte) 0xA4) {
                 Log.d(TAG, "NDEF file selection");
@@ -386,8 +442,14 @@ public class NfcEmulatorService extends HostApduService {
         
         Log.d(TAG, "NFC connection deactivated: " + reasonStr);
         
-        // Reload configuration in case it changed during the transaction
         loadEmulationConfiguration();
+    }
+    
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        stopEmulation();
+        Log.d(TAG, "Service destroyed");
     }
     
     private static byte[] hexStringToByteArray(String s) {
@@ -395,12 +457,11 @@ public class NfcEmulatorService extends HostApduService {
             return new byte[0];
         }
         
-        // Remove any spaces or separators
         s = s.replaceAll("[^0-9A-Fa-f]", "");
         
         int len = s.length();
         if (len % 2 != 0) {
-            s = "0" + s; // Pad with leading zero if odd length
+            s = "0" + s;
             len++;
         }
         
@@ -422,5 +483,35 @@ public class NfcEmulatorService extends HostApduService {
             sb.append(String.format("%02X", b));
         }
         return sb.toString();
+    }
+}
+
+/* EmulationControlReceiver.java */
+package com.nfcclone.app;
+
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.util.Log;
+
+public class EmulationControlReceiver extends BroadcastReceiver {
+    private static final String TAG = "EmulationControlReceiver";
+    
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        String action = intent.getAction();
+        Log.d(TAG, "Received broadcast: " + action);
+        
+        if ("com.nfcclone.app.STOP_EMULATION".equals(action)) {
+            try {
+                Intent serviceIntent = new Intent(context, NfcEmulatorService.class);
+                serviceIntent.putExtra("action", "stop_emulation");
+                context.startService(serviceIntent);
+                
+                Log.d(TAG, "Emulation stop signal sent");
+            } catch (Exception e) {
+                Log.e(TAG, "Error stopping emulation", e);
+            }
+        }
     }
 }
