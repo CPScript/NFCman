@@ -1,0 +1,6 @@
+<!-- android/res/xml/backup_rules.xml -->
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="file" path="cards/"/>
+    <exclude domain="file" path="emulation_config.json"/>
+</full-backup-content>
