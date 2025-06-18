@@ -1,0 +1,49 @@
+<!-- android/res/layout/activity_main.xml -->
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="#1a1a1a">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="NFC Clone"
+        android:textSize="32sp"
+        android:textColor="#ffffff"
+        android:textAlignment="center"
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Initializing..."
+        android:textSize="16sp"
+        android:textColor="#cccccc"
+        android:textAlignment="center"
+        android:padding="16dp"
+        android:background="#2a2a2a"
+        android:layout_marginBottom="24dp" />
+
+    <Button
+        android:id="@+id/read_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Read NFC Card"
+        android:textSize="18sp"
+        android:layout_marginBottom="16dp"
+        android:enabled="false" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Permissions and NFC must be enabled to read cards.\nUse the Termux script to manage and emulate cards."
+        android:textColor="#cccccc"
+        android:textAlignment="center"
+        android:layout_marginTop="24dp"
+        android:textSize="14sp" />
+
+</LinearLayout>
