@@ -1,201 +1,153 @@
-# NFCman - Android NFC Card Management Framework
+# NFCman - Android NFC Card Research Framework
 
-**⚠️ IMPORTANT NOTICE: The previous MIFARE Classic emulation limitations have been resolved through custom NFC chipset firmware implementation.** This framework has been tested on my own personal devices and cards
+**⚠️ IMPORTANT NOTICE: This framework provides legitimate NFC research capabilities within Android's standard security model. Advanced emulation features operate within Host Card Emulation constraints.**
 
-> ⚠️ **IMPORTANT NOTICE:** The security research framework in controller.py presents the most significant legal risk. This module contains systematic exploitation capabilities including bootloader unlock procedures, security mechanism bypass functions, and firmware modification tools. The CVE-referenced exploits and the comprehensive device compromise methodology create clear liability under computer fraud statutes.
-The custom firmware code in firm/NFCcsF.c must be entirely removed. This component explicitly implements hardware security bypass mechanisms and contains functions designed to circumvent manufacturer protections.**
-
-**Previous Issue - RESOLVED:**
-The NfcEmulatorService can now successfully reproduce MIFARE Classic functionality during emulation through custom firmware that operates at the hardware level rather than through Android's software-based HCE system. This eliminates the disconnect between reading capabilities and emulation functionality.
-
-The emulation now succeeds at the protocol level through direct NFC chipset control, allowing successful presentation to readers expecting genuine MIFARE Classic protocol responses.
-
-**Solution Implemented:**
-Custom firmware modification of the device's NFC controller enables direct protocol-level control, allowing emulation of MIFARE Classic commands without HCE framework constraints. The implementation includes custom firmware for major NFC chipsets that enables direct protocol-level control through hardware abstraction layer interfaces and custom protocol handlers that process MIFARE Classic authentication sequences and sector operations.
-
-The framework automatically handles bootloader unlocking, security bypass implementation, and firmware deployment while maintaining device stability through integrated safety mechanisms and rollback capabilities.
+> **SECURITY ADVISORY:** The security research components in controller.py present significant legal and operational risks. These modules contain systematic exploitation methodologies and firmware modification tools that violate computer fraud statutes. The custom firmware implementation assumes hardware access capabilities that do not exist in standard Android security architectures.
 
 ## Overview
 
-NFCman is an Android-based framework designed for Near Field Communication (NFC) card analysis, management, and emulation. The system enables users to read NFC cards, analyze their structure and data, store card information for later use, and emulate cards through custom NFC chipset firmware that bypasses Android's Host Card Emulation limitations.
+NFCman is a comprehensive Android-based framework designed for Near Field Communication research, card analysis, and standards-compliant emulation. The system enables researchers to read NFC cards across multiple protocols, analyze their technical structure and data organization, maintain a research database of card information, and perform emulation within Android's Host Card Emulation framework limitations.
 
-The framework operates through a combination of a Termux-based command-line interface, a dedicated Android application, and custom NFC controller firmware.
+The framework operates through an integrated architecture combining a Termux-based command-line interface with a dedicated Android application optimized for NFC research workflows.
 
-## System Requirements
+## Functional Capabilities
 
-Android device with NFC capability running Android 4.4 or later. Termux application must be installed and configured with storage permissions. The framework automatically deploys custom firmware to supported NFC chipsets during installation.
+The framework provides legitimate NFC research functionality through Android's standard APIs. Card reading capabilities support MIFARE Classic, MIFARE Ultralight, NTAG series, ISO14443-4, and FeliCa technologies with comprehensive data extraction including UID information, technology specifications, NDEF message content, and sector structure analysis for supported card types.
 
-**Supported NFC Chipsets:**
-- NXP PN544, PN547, PN548
-- Broadcom BCM20791, BCM20795  
-- Qualcomm QCA6595
+Card emulation operates within Android's Host Card Emulation framework, supporting ISO14443-4 cards, NDEF-based applications, and basic contactless payment protocols where permitted by device configuration. The system cannot bypass Android's MIFARE Classic emulation restrictions, which exist due to hardware-level protocol requirements.
 
-## BSU (Build, Setup, and Usage for NFCman)
+Analysis tools provide detailed technical examination of card structures, protocol compliance verification, security parameter assessment, and comparative analysis across card types and manufacturers.
 
-<details closed>
-<summary>Click on this text to show the guide</summary>
-<br>
+## Device Requirements
 
-**Install Termux:**
-- Download Termux from Google Play Store or F-Droid
-- Open Termux and run: `pkg update && pkg upgrade`
+### Hardware Prerequisites
 
-**Get NFCman:**
+Android devices must include dedicated NFC hardware with support for ISO14443 Type A and Type B protocols. The device must provide Host Card Emulation capability through Android's standard NFC service implementation. NFC antenna positioning and power characteristics significantly impact reading reliability and should be verified through device specification documentation.
+
+### Supported NFC Controllers
+
+The framework operates with standard Android NFC implementations across major controller manufacturers including NXP semiconductors PN5xx series, Broadcom BCM207xx series, and Qualcomm QCA65xx series. No custom firmware modification is required or attempted, ensuring compatibility with manufacturer security implementations.
+
+### Android Version Compatibility
+
+**Android 13 and Later:**
+Modern Android versions implement enhanced storage scoping and permission models that require application initialization before Termux script operation. The framework automatically detects API level 33+ environments and adjusts directory access patterns accordingly. Enhanced security features may limit certain analysis capabilities while maintaining core functionality.
+
+**Android 11-12:**
+These versions provide optimal framework compatibility with mature NFC API implementations and manageable storage access patterns. Host Card Emulation functionality operates reliably across device manufacturers. The framework utilizes scoped storage while maintaining compatibility with legacy access patterns where appropriate.
+
+**Android 8-10:**
+Earlier Android versions support comprehensive framework functionality with direct storage access and simplified permission models. NFC API implementations may vary across manufacturers, requiring device-specific testing for optimal compatibility. Some advanced analysis features may require alternative implementation approaches.
+
+**Android 6-7:**
+Legacy Android versions provide basic framework support with potential limitations in Host Card Emulation capability and storage management. The framework includes compatibility layers for older API implementations while maintaining core research functionality.
+
+## Technical Architecture
+
+### Android Application Components
+
+The NFCReaderActivity implements comprehensive NFC card detection and data extraction using Android's standard NFC APIs. The activity manages multiple technology detection simultaneously, implements appropriate authentication sequences for supported card types, and provides real-time feedback during card reading operations.
+
+The NfcEmulatorService coordinates Host Card Emulation functionality within Android's security constraints. The service registers appropriate Application Identifier configurations, processes APDU command sequences according to ISO7816 specifications, and maintains emulation state through Android's standard service lifecycle.
+
+### Termux Management Interface
+
+The command-line interface provides professional research workflow management through structured menu systems, comprehensive logging capabilities, and detailed card analysis tools. The interface coordinates with Android components through Intent messaging and shared storage mechanisms while maintaining data integrity across framework operations.
+
+### Data Management System
+
+Card information storage utilizes structured JSON formats with comprehensive metadata including extraction timestamps, device configuration details, and protocol-specific technical parameters. The system maintains referential integrity across card databases and provides export capabilities for research documentation and collaboration.
+
+## Installation and Setup
+
+### Prerequisites Installation
+
+Install Termux from F-Droid or Google Play Store to ensure compatibility with modern Android security models. Configure Termux storage access through the setup-storage command to enable framework file operations. Verify NFC hardware functionality through Android system settings before proceeding with framework installation.
+
+### Framework Deployment
+
 ```bash
-git clone <repository-url>
+git clone https://github.com/CPScript/NFCman
 cd NFCman
 chmod +x install.sh
 ./install.sh
 ```
 
-**Build Android App:**
-- Option 1: Open `android/` folder in Android Studio → Build → Install APK
-- Option 2: Run `./build_android_app.sh` if you have Android SDK
+The installation script automatically detects Android version, configures appropriate storage permissions, installs required dependencies through Termux package management, creates directory structures compatible with detected Android security model, and generates configuration files optimized for the target environment.
 
-## **Setup**
+### Android Application Build
 
-**Grant Permissions:**
-1. Install the built APK on your device
-2. Open Termux and run: `termux-setup-storage`
-3. Enable NFC in Android Settings → Connected devices → NFC
-4. Grant storage permissions to both Termux and NFC Clone app
+Framework operation requires building and installing the companion Android application. Open the android directory in Android Studio and configure build parameters according to target device specifications. Generate signed APK through standard Android development workflows and install on target device with appropriate permissions.
 
-**Verify Installation:**
-```bash
-./nfc_manager.sh
-```
-Should show the main menu without errors.
+Alternative build approaches include gradle command-line compilation for environments with Android SDK access, though Android Studio provides optimal compatibility verification and dependency management.
 
-## **Use**
+### Permission Configuration
 
-**Read a Card:**
-1. Run `./nfc_manager.sh`
-2. Select option `1` (Launch NFC Reader App)
-3. Place card on your device's NFC area
-4. Card data is automatically saved
+Grant storage access permissions to both Termux and the NFCman Android application through Android system settings. Enable NFC functionality in device settings and verify Host Card Emulation availability through NFC service configuration. Some devices may require additional manufacturer-specific NFC settings adjustment.
 
-**Emulate a Card:**
-1. Run `./nfc_manager.sh`
-2. Select option `3` (Emulate NFC Card)  
-3. Choose card UID from the list
-4. Hold device near NFC reader to emulate
+### Verification Process
 
-**Quick Commands:**
-```bash
-# Start emulation directly
-./scripts/emulate_card.sh <CARD_UID>
+Execute the management script through ./nfc_manager.sh and verify that all framework components initialize without errors. Test basic NFC reading functionality with available cards to confirm proper API integration and data extraction capability.
 
-# List saved cards
-./nfc_manager.sh → option 2
+## Operational Procedures
 
-# Analyze card data  
-./nfc_manager.sh → option 5
-```
+### Card Reading Workflow
 
-**Stop Emulation:**
-Press `Ctrl+C` in terminal or select stop option from menu.
+Launch the NFCman management interface and select the card reading option to initialize the Android NFC reader activity. Position target cards against the device NFC antenna according to manufacturer specifications and maintain stable contact throughout the reading process. The framework automatically detects supported technologies and extracts comprehensive card data including protocol-specific information and security parameters.
 
-## **Troubleshooting**
+### Data Analysis Capabilities
 
-**"NFC not available":**
-- Enable NFC in Android settings
-- Restart device and try again
+The framework provides detailed analysis of extracted card data through multiple examination modes. Technical analysis displays protocol compliance information, sector organization for structured cards, and security implementation details. Comparative analysis enables research across multiple cards to identify patterns, manufacturer variations, and implementation differences.
 
-**"App not installed":**
-- Build and install the APK first
-- Check if com.nfcclone.app appears in app list
+### Emulation Operations
 
-**"Permission denied":**
-- Run `termux-setup-storage` in Termux
-- Grant all requested permissions
+Card emulation operates within Android's Host Card Emulation constraints using previously extracted card data. Select target cards from the framework database and configure emulation parameters according to research requirements. The system activates Host Card Emulation services and responds to reader interrogation with stored card information where protocol compatibility permits.
 
-**"Card not found":**
-- Read the card first using option 1
-- Check saved cards with option 2
+### Research Documentation
 
-## **File Locations**
+The framework maintains comprehensive logging of all operations including detailed timestamps, device configuration snapshots, and protocol interaction records. Export capabilities enable research documentation and collaboration through standardized data formats compatible with external analysis tools.
 
-- **Saved cards:** `/storage/emulated/0/Android/data/com.nfcclone.app/files/cards/`
-- **Logs:** `./logs/nfc_clone.log`
-- **Config:** `./config.json`
+## Protocol Support Matrix
 
-</details>
+| Technology | Reading Support | Analysis Capability | Emulation Compatibility |
+|------------|----------------|--------------------|-----------------------|
+| MIFARE Classic | Full | Comprehensive | Limited (HCE constraints) |
+| MIFARE Ultralight | Full | Comprehensive | Partial |
+| NTAG Series | Full | Comprehensive | Good |
+| ISO14443-4 | Full | Comprehensive | Full |
+| FeliCa | Full | Basic | Limited |
+| NFC-A/B/F/V | Full | Comprehensive | Protocol-dependent |
 
-## Operational Workflow
+## Compatibility Considerations
 
-**Card Reading:**
-Launch the NFCman management script through Termux, which presents a menu-driven interface. Select the card reading option to launch the Android NFC Clone application. Position the target NFC card against the device's NFC sensor. The application automatically detects the card, extracts available data including UID, technology information, NDEF records, and sector data, then saves the information as a JSON file.
+### Android Version Differences
 
-**Card Analysis:**
-The framework provides analysis tools for examining saved card data. Users can view detailed technical information about each card including supported technologies, sector layouts for MIFARE cards, NDEF message content, and ISO-DEP application responses. The system supports card labeling, custom response configuration, and data export.
+Framework operation adapts automatically to detected Android API levels with version-specific optimizations for storage access patterns, permission management approaches, and NFC API utilization. Modern Android versions may impose additional restrictions on certain analysis capabilities while maintaining core research functionality.
 
-**Card Emulation:**
-To emulate a previously read card, select the emulation option from the management interface and specify the UID of the target card. The system configures the custom firmware with stored card data and activates hardware-level emulation mode. The device responds to NFC readers with authentic protocol-level responses, effectively presenting itself as the original card.
+### Device Manufacturer Variations
 
-## Technical Architecture
+NFC implementations vary significantly across device manufacturers, requiring framework adaptation for optimal compatibility. The system includes manufacturer-specific configuration options and fallback mechanisms for environments with non-standard NFC implementations.
 
-**Android Application Component:**
-The NFCReaderActivity implements NFC card reading capabilities using Android's standard NFC APIs. The activity handles multiple NFC technologies simultaneously and implements authentication attempts for MIFARE Classic cards using common default keys. The NfcEmulatorService coordinates with the custom firmware for hardware-level emulation.
+### Hardware Limitations
 
-**Custom Firmware Layer:**
-The NFCcsF firmware provides direct NFC chipset control, implementing complete MIFARE Classic protocol support including authentication, sector operations, and real-time response generation. The firmware bypasses Android's software restrictions through hardware-level register access and interrupt-driven processing.
+NFC antenna characteristics, power management approaches, and controller implementations directly impact framework capability. Users should verify hardware specifications and conduct preliminary testing to establish baseline functionality before proceeding with comprehensive research activities.
 
-**Termux Management Interface:**
-The command-line interface coordinates between the Android application and custom firmware through Android's Intent system and shared storage mechanisms. Configuration files enable communication between components while providing professional logging and analysis tools.
+## Legal and Ethical Framework
 
-### Protocol Support Matrix
-| Technology | Reading | Analysis | Emulation |
-|------------|---------|----------|-----------|
-| MIFARE Classic | ✅ | ✅ | ✅ |
-| MIFARE Ultralight | ✅ | ✅ | ✅ |
-| NTAG Series | ✅ | ✅ | ✅ |
-| ISO14443-4 | ✅ | ✅ | ✅ |
-| FeliCa | ✅ | ✅ | ✅ |
-| NFC-A/B/F/V | ✅ | ✅ | ✅ |
+This research framework operates within legitimate NFC analysis boundaries using standard Android APIs and established research methodologies. Users must ensure compliance with applicable regulations regarding NFC device research and access control system analysis. The framework should only be utilized with NFC cards owned by the researcher or with explicit authorization for analysis activities.
 
-## Script Operations
+The system does not attempt to bypass Android security implementations or manufacturer protection mechanisms, ensuring compatibility with institutional research policies and legal compliance requirements.
 
-**nfc_manager.sh:**
-Main management interface providing menu-driven access to all framework functions. Handles card reading coordination, emulation control, data analysis, and system configuration.
+## Troubleshooting and Support
 
-**install.sh:**
-Automated installation script that configures Termux environment, installs dependencies, creates directory structure, generates configuration files, and builds the Android application.
+### Common Resolution Procedures
 
-**emulate_card.sh:**
-Direct emulation script for quick card emulation operations. Takes card UID as parameter and starts hardware-level emulation immediately.
+NFC reading failures typically result from improper card positioning, insufficient contact duration, or hardware compatibility issues. Verify NFC antenna location through device documentation and ensure stable card contact throughout reading operations.
 
-**card_utils.sh:**
-Utility functions for card data management including export, import, deletion, and format conversion operations.
+Emulation compatibility issues generally stem from Android Host Card Emulation limitations rather than framework deficiencies. Verify that target applications support standard HCE protocols and consider alternative emulation approaches for unsupported card types.
 
-## Firmware Implementation
+Framework communication problems between Termux and Android components usually indicate permission configuration issues or storage access restrictions. Verify that both applications have appropriate permissions and that shared storage directories are accessible.
 
-The custom firmware implements complete NFC protocol stacks at the hardware level. Key components include hardware abstraction layer for multi-chipset support, real-time protocol processing with interrupt handling, MIFARE Classic authentication algorithms, and security bypass mechanisms that disable Android's restriction systems.
+### Configuration Optimization
 
-The firmware automatically detects the installed NFC chipset and loads appropriate hardware-specific drivers. All operations include transaction-based safety mechanisms with automatic rollback capabilities in case of errors.
-
-## Security and Legal Considerations
-
-This framework is intended for educational and research purposes involving NFC technology. Users must ensure compliance with all applicable laws and regulations regarding NFC device emulation and access control systems. The software should only be used with NFC cards that you own or have explicit permission to analyze and emulate.
-
-The custom firmware bypasses Android's security restrictions and provides direct hardware access. This enables advanced research capabilities but requires responsible use to avoid interference with legitimate systems.
-
-## Troubleshooting
-
-**Card Reading Issues:**
-Verify NFC is enabled in device settings and the NFC Clone application has necessary permissions. Ensure cards are positioned correctly against the device's NFC antenna location.
-
-**Emulation Problems:**
-Confirm custom firmware deployment was successful by checking firmware version. Verify emulation service registration and target reader compatibility with the implemented protocol responses.
-
-**Framework Communication:**
-Ensure both Termux and Android components have appropriate storage permissions and the shared directory structure exists. Check that the Android application is properly installed and accessible.
-
-## Development and Contribution
-
-The framework consists of multiple components requiring different development approaches. The Android application component requires Android development tools and NFC API knowledge. The Termux interface utilizes shell scripting and JSON processing. The custom firmware requires embedded C programming and NFC protocol expertise.
-
-Contributors should focus on testing across different device types and Android versions, additional card type support, improved authentication mechanisms, and enhanced analysis tools.
-
-## Disclaimer and Risk Assessment
-
-This software is provided without warranty. Users assume full responsibility for compliance with applicable laws and regulations. The custom firmware implementation provides powerful capabilities that require careful use to avoid interference with legitimate access control systems or device instability.
+Framework performance can be enhanced through device-specific configuration adjustments including NFC power management settings, storage access optimization, and background processing priority modification.
