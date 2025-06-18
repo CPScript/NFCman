@@ -1,18 +1,17 @@
+<!-- android/res/xml/apduservice.xml -->
 <?xml version="1.0" encoding="utf-8"?>
 <host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/service_description"
     android:requireDeviceUnlock="false">
     
-    <!-- Default AID group for payment systems -->
     <aid-group android:category="payment" android:description="@string/payment_cards">
         <aid-filter android:name="F001020304050607" />
-        <aid-filter android:name="A000000172950001" /> <!-- EMV -->
-        <aid-filter android:name="A0000001510000" /> <!-- VISA -->
+        <aid-filter android:name="A000000172950001" />
+        <aid-filter android:name="A0000001510000" />
     </aid-group>
     
-    <!-- AID group for access control systems -->
     <aid-group android:category="other" android:description="@string/access_cards">
         <aid-filter android:name="F0010203040506" />
-        <aid-filter android:name="D2760000850101" /> <!-- Common for access control -->
+        <aid-filter android:name="D2760000850101" />
     </aid-group>
 </host-apdu-service>
