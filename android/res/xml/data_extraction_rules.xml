@@ -1,0 +1,12 @@
+<!-- android/res/xml/data_extraction_rules.xml -->
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="cards/"/>
+        <exclude domain="file" path="emulation_config.json"/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="cards/"/>
+        <exclude domain="file" path="emulation_config.json"/>
+    </device-transfer>
+</data-extraction-rules>
