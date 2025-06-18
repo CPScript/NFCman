@@ -1,0 +1,14 @@
+<!-- android/res/values/strings.xml -->
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NFC Clone</string>
+    <string name="service_description">NFC Card Emulation Service</string>
+    <string name="payment_cards">Payment Cards</string>
+    <string name="access_cards">Access Control Cards</string>
+    <string name="nfc_required_title">NFC Required</string>
+    <string name="nfc_required_message">This app requires NFC to function. Please enable NFC in your device settings.</string>
+    <string name="permissions_required_title">Permissions Required</string>
+    <string name="permissions_required_message">This app needs various permissions to read and store NFC card data.</string>
+    <string name="storage_permission_title">Storage Access Required</string>
+    <string name="storage_permission_message">This app needs access to storage to save NFC card data.</string>
+</resources>
