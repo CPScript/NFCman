@@ -1,3 +1,12 @@
+Includes;
+
+* Android app (android/)
+* Desktop Software (controller.py)
+* Firmware (firm/)
+* Termux Framework (everything else)
+
+---
+
 # NFCman - Android NFC Card Research Framework
 
 **⚠️ IMPORTANT NOTICE: This framework provides legitimate NFC research capabilities within Android's standard security model. Advanced emulation features operate within Host Card Emulation constraints.**
