@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-Linux Based Host Controller with Android Device Interface
-
-Comments are included for error handling
+"too, legally risky" (i suppose, but its still going to be here)
 """
 
 import os
