@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-"too, legally risky" (i suppose, but its still going to be here)
+This component is strictly for authorized security research on devices you own or have explicit permission to analyze. Unauthorized use violates computer fraud statutes and institutional security policies.
 """
 
 import os
