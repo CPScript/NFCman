@@ -1,7 +1,5 @@
 #!/bin/bash
-# Utility functions for NFC card operations
 
-# Load configuration
 function load_config() {
     if [ -f "config.json" ]; then
         CARD_DATA_DIR=$(jq -r '.card_data_dir // "./cards"' config.json)
@@ -11,18 +9,15 @@ function load_config() {
         NFC_READER="usb"
     fi
     
-    # Create cards directory if it doesn't exist
     mkdir -p "$CARD_DATA_DIR"
 }
 
-# Get path for a card file
 function get_card_path() {
     local uid="$1"
     load_config
     echo "${CARD_DATA_DIR}/card_${uid}.json"
 }
 
-# List all saved cards
 function list_saved_cards() {
     load_config
     
@@ -31,7 +26,6 @@ function list_saved_cards() {
     echo "| UID                | Type            |"
     echo "----------------------------------------"
     
-    # Find all card files
     find "$CARD_DATA_DIR" -name "card_*.json" | while read -r card_file; do
         if [ -f "$card_file" ]; then
             local uid=$(jq -r '.UID // "Unknown"' "$card_file")
@@ -43,7 +37,6 @@ function list_saved_cards() {
     echo "----------------------------------------"
 }
 
-# Delete a saved card
 function delete_card() {
     local uid="$1"
     local card_file=$(get_card_path "$uid")
@@ -58,7 +51,6 @@ function delete_card() {
     fi
 }
 
-# Export a card to a portable format
 function export_card() {
     local uid="$1"
     local output_file="$2"
@@ -69,7 +61,6 @@ function export_card() {
     fi
     
     if [ -f "$card_file" ]; then
-        # Create a simplified export with essential data
         jq '{
             UID: .UID,
             Type: .Type,
@@ -86,7 +77,6 @@ function export_card() {
     fi
 }
 
-# Import a card from exported format
 function import_card() {
     local import_file="$1"
     
@@ -95,7 +85,6 @@ function import_card() {
         return 1
     fi
     
-    # Validate the import file
     if ! jq -e '.UID' "$import_file" > /dev/null; then
         echo "[!] Invalid card format. Missing UID."
         return 1
@@ -104,7 +93,6 @@ function import_card() {
     local uid=$(jq -r '.UID' "$import_file")
     local card_file=$(get_card_path "$uid")
     
-    # Check if card already exists
     if [ -f "$card_file" ]; then
         echo -n "[?] Card already exists. Override? (y/n): "
         read -r answer
@@ -114,7 +102,6 @@ function import_card() {
         fi
     fi
     
-    # Copy the import file
     cp "$import_file" "$card_file"
     echo "[+] Card imported: $uid"
     return 0
