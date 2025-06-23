@@ -90,39 +90,56 @@ public class NFCReaderActivity extends Activity {
     }
     
     private void setupCardsDirectory() {
-        try {
-            File internalCardsDir = new File(getFilesDir(), "cards");
-            if (!internalCardsDir.exists()) {
-                internalCardsDir.mkdirs();
+        File primaryDir = null;
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+            File documentsDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "NFCClone");
+            primaryDir = new File(documentsDir, "cards");
+            if (!primaryDir.exists()) {
+                primaryDir.mkdirs();
             }
-            cardsDir = internalCardsDir;
-            
+            Log.d(TAG, "Using Documents directory for storage: " + primaryDir.getAbsolutePath());
+        }
+        
+        if (primaryDir == null || !primaryDir.exists() || !primaryDir.canWrite()) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                 try {
-                    File externalCardsDir = new File("/storage/emulated/0/Android/data/" + getPackageName() + "/files/cards");
-                    if (externalCardsDir.exists() || externalCardsDir.mkdirs()) {
-                        cardsDir = externalCardsDir;
+                    File legacyDir = new File(Environment.getExternalStorageDirectory(), "NFCClone");
+                    primaryDir = new File(legacyDir, "cards");
+                    if (!primaryDir.exists()) {
+                        primaryDir.mkdirs();
+                    }
+                    if (primaryDir.canWrite()) {
+                        Log.d(TAG, "Using legacy external storage: " + primaryDir.getAbsolutePath());
+                    } else {
+                        primaryDir = null;
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "Could not create external cards directory", e);
-                }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
-                try {
-                    File documentsCardsDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "NFCClone/cards");
-                    if (documentsCardsDir.exists() || documentsCardsDir.mkdirs()) {
-                        cardsDir = documentsCardsDir;
-                    }
-                } catch (Exception e) {
-                    Log.w(TAG, "Could not create documents cards directory", e);
+                    Log.w(TAG, "Cannot use legacy external storage", e);
+                    primaryDir = null;
                 }
             }
-            
-            Log.d(TAG, "Cards directory: " + cardsDir.getAbsolutePath());
-            
-        } catch (Exception e) {
-            Log.e(TAG, "Error setting up cards directory", e);
-            cardsDir = new File(getFilesDir(), "cards");
-            cardsDir.mkdirs();
+        }
+        
+        if (primaryDir == null || !primaryDir.exists() || !primaryDir.canWrite()) {
+            File internalDir = new File(getFilesDir(), "cards");
+            if (!internalDir.exists()) {
+                internalDir.mkdirs();
+            }
+            primaryDir = internalDir;
+            Log.d(TAG, "Using internal storage fallback: " + primaryDir.getAbsolutePath());
+        }
+        
+        cardsDir = primaryDir;
+        Log.d(TAG, "Cards will be saved to: " + cardsDir.getAbsolutePath());
+        
+        if (!cardsDir.exists()) {
+            boolean created = cardsDir.mkdirs();
+            Log.d(TAG, "Cards directory created: " + created);
+        }
+        
+        if (!cardsDir.canWrite()) {
+            Log.e(TAG, "Warning: Cards directory is not writable");
         }
     }
     
@@ -301,10 +318,13 @@ public class NFCReaderActivity extends Activity {
                 cardData.put("NFC_A_Error", e.getMessage());
             }
             
-            saveCardData(uidHex, cardData);
-            
-            updateStatus("Card saved: " + uidHex + "\nPlace another card or press back");
-            Toast.makeText(this, "Card " + uidHex + " saved successfully", Toast.LENGTH_SHORT).show();
+            if (saveCardData(uidHex, cardData)) {
+                updateStatus("Card saved: " + uidHex + "\nSaved to: " + cardsDir.getAbsolutePath() + "\nPlace another card or press back");
+                Toast.makeText(this, "Card " + uidHex + " saved successfully", Toast.LENGTH_SHORT).show();
+            } else {
+                updateStatus("Failed to save card: " + uidHex + "\nCheck permissions and storage");
+                Toast.makeText(this, "Failed to save card " + uidHex, Toast.LENGTH_LONG).show();
+            }
             
         } catch (Exception e) {
             Log.e(TAG, "Error processing tag", e);
@@ -484,18 +504,37 @@ public class NFCReaderActivity extends Activity {
         return command;
     }
     
-    private void saveCardData(String uid, JSONObject cardData) throws IOException, JSONException {
+    private boolean saveCardData(String uid, JSONObject cardData) {
         File cardFile = new File(cardsDir, "card_" + uid + ".json");
         
-        cardData.put("custom_response", "9000");
-        cardData.put("label", "");
-        cardData.put("saved_location", cardFile.getAbsolutePath());
-        
-        FileWriter writer = new FileWriter(cardFile);
-        writer.write(cardData.toString(4));
-        writer.close();
-        
-        Log.d(TAG, "Card saved: " + cardFile.getAbsolutePath());
+        try {
+            cardData.put("custom_response", "9000");
+            cardData.put("label", "");
+            cardData.put("saved_location", cardFile.getAbsolutePath());
+            
+            FileWriter writer = new FileWriter(cardFile);
+            writer.write(cardData.toString(4));
+            writer.close();
+            
+            Log.d(TAG, "Card saved: " + cardFile.getAbsolutePath());
+            
+            if (!cardFile.exists()) {
+                Log.e(TAG, "File was not created successfully");
+                return false;
+            }
+            
+            if (cardFile.length() == 0) {
+                Log.e(TAG, "File is empty after writing");
+                return false;
+            }
+            
+            Log.d(TAG, "Card file size: " + cardFile.length() + " bytes");
+            return true;
+            
+        } catch (IOException | JSONException e) {
+            Log.e(TAG, "Error saving card data", e);
+            return false;
+        }
     }
     
     private String bytesToHex(byte[] bytes) {
