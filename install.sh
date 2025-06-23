@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# Updated install script to be for all android applications
-
 set -e
 
 echo "╔═══════════════════════════════════════════════════════════════╗"
@@ -13,7 +11,9 @@ detect_android_version() {
     version=$(getprop ro.build.version.release 2>/dev/null | cut -d. -f1)
     if [ -z "$version" ]; then
         version=$(getprop ro.build.version.sdk 2>/dev/null)
-        if [ "$version" -ge 33 ]; then
+        if [ "$version" -ge 34 ]; then
+            version=14
+        elif [ "$version" -ge 33 ]; then
             version=13
         elif [ "$version" -ge 30 ]; then
             version=11
@@ -103,17 +103,22 @@ create_directory_structure() {
     mkdir -p "$HOME/nfc_cards"
     mkdir -p logs
     
-    local android_data_dir="/storage/emulated/0/Android/data/com.nfcclone.app/files"
-    local cards_dir="$android_data_dir/cards"
+    local public_dir="/storage/emulated/0/Documents/NFCClone"
+    mkdir -p "$public_dir/cards" 2>/dev/null || true
     
     if [ "$android_version" -lt 11 ]; then
-        mkdir -p "$android_data_dir" 2>/dev/null || true
-        mkdir -p "$cards_dir" 2>/dev/null || true
+        local legacy_dir="/storage/emulated/0/NFCClone"
+        mkdir -p "$legacy_dir/cards" 2>/dev/null || true
     fi
     
     mkdir -p android/res/layout
     mkdir -p android/res/xml
     mkdir -p android/res/values
+    mkdir -p android/res/mipmap-hdpi
+    mkdir -p android/res/mipmap-mdpi
+    mkdir -p android/res/mipmap-xhdpi
+    mkdir -p android/res/mipmap-xxhdpi
+    mkdir -p android/res/mipmap-xxxhdpi
     mkdir -p android/src/com/nfcclone/app
 }
 
@@ -123,10 +128,10 @@ create_configuration() {
     echo "[*] Creating configuration for Android $android_version..."
     
     local termux_cards_dir="$HOME/nfc_cards"
-    local android_data_dir="/storage/emulated/0/Android/data/com.nfcclone.app/files"
-    local primary_cards_dir="$android_data_dir/cards"
+    local public_cards_dir="/storage/emulated/0/Documents/NFCClone/cards"
+    local primary_cards_dir="$public_cards_dir"
     
-    if [ "$android_version" -ge 11 ]; then
+    if [ "$android_version" -ge 14 ]; then
         primary_cards_dir="$termux_cards_dir"
     fi
     
@@ -134,7 +139,7 @@ create_configuration() {
 {
     "android_version": $android_version,
     "termux_cards_dir": "$termux_cards_dir",
-    "android_data_dir": "$android_data_dir",
+    "public_cards_dir": "$public_cards_dir",
     "primary_cards_dir": "$primary_cards_dir",
     "enable_logging": true,
     "log_file": "./logs/nfc_clone.log",
@@ -155,7 +160,8 @@ create_configuration() {
     "compatibility": {
         "use_fallback_detection": $([ "$android_version" -ge 11 ] && echo true || echo false),
         "require_app_initialization": $([ "$android_version" -ge 13 ] && echo true || echo false),
-        "use_internal_storage": $([ "$android_version" -ge 11 ] && echo true || echo false)
+        "use_internal_storage": $([ "$android_version" -ge 14 ] && echo true || echo false),
+        "require_manage_external_storage": $([ "$android_version" -ge 11 ] && echo true || echo false)
     }
 }
 EOF
@@ -171,11 +177,14 @@ create_android_manifest() {
 
     <uses-sdk
         android:minSdkVersion="19"
-        android:targetSdkVersion="33" />
+        android:targetSdkVersion="34" />
 
     <uses-permission android:name="android.permission.NFC" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" android:minSdkVersion="30" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
     <uses-feature
         android:name="android.hardware.nfc"
@@ -251,25 +260,26 @@ create_android_manifest() {
 EOF
 }
 
-create_apdu_service_config() {
-    cat > android/res/xml/apduservice.xml << 'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:description="@string/service_description"
-    android:requireDeviceUnlock="false">
+create_app_icons() {
+    echo "[*] Creating app icons..."
     
-    <aid-group android:category="payment" android:description="@string/payment_cards">
-        <aid-filter android:name="F001020304050607" />
-        <aid-filter android:name="A000000172950001" />
-        <aid-filter android:name="A0000001510000" />
-    </aid-group>
-    
-    <aid-group android:category="other" android:description="@string/access_cards">
-        <aid-filter android:name="F0010203040506" />
-        <aid-filter android:name="D2760000850101" />
-    </aid-group>
-</host-apdu-service>
+    cat > android/res/mipmap-hdpi/ic_launcher.png << 'EOF' | base64 -d > android/res/mipmap-hdpi/ic_launcher.png || true
 EOF
+    
+    cat > android/res/mipmap-mdpi/ic_launcher.png << 'EOF' | base64 -d > android/res/mipmap-mdpi/ic_launcher.png || true
+EOF
+    
+    cat > android/res/mipmap-xhdpi/ic_launcher.png << 'EOF' | base64 -d > android/res/mipmap-xhdpi/ic_launcher.png || true
+EOF
+    
+    cat > android/res/mipmap-xxhdpi/ic_launcher.png << 'EOF' | base64 -d > android/res/mipmap-xxhdpi/ic_launcher.png || true
+EOF
+    
+    cat > android/res/mipmap-xxxhdpi/ic_launcher.png << 'EOF' | base64 -d > android/res/mipmap-xxxhdpi/ic_launcher.png || true
+EOF
+    
+    echo "[*] Note: Icon files created as placeholders. Replace with actual PNG files."
+    echo "[*] Use the provided SVG logo to generate PNG icons at different resolutions."
 }
 
 create_nfc_tech_filter() {
@@ -320,7 +330,19 @@ create_android_layouts() {
         android:textSize="32sp"
         android:textColor="#ffffff"
         android:textAlignment="center"
-        android:layout_marginBottom="48dp" />
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Initializing..."
+        android:textSize="16sp"
+        android:textColor="#cccccc"
+        android:textAlignment="center"
+        android:padding="16dp"
+        android:background="#2a2a2a"
+        android:layout_marginBottom="24dp" />
 
     <Button
         android:id="@+id/read_button"
@@ -328,15 +350,17 @@ create_android_layouts() {
         android:layout_height="wrap_content"
         android:text="Read NFC Card"
         android:textSize="18sp"
-        android:layout_marginBottom="16dp" />
+        android:layout_marginBottom="16dp"
+        android:enabled="false" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Use the Termux script to manage and emulate cards"
+        android:text="Permissions and NFC must be enabled to read cards.\nUse the Termux script to manage and emulate cards."
         android:textColor="#cccccc"
         android:textAlignment="center"
-        android:layout_marginTop="24dp" />
+        android:layout_marginTop="24dp"
+        android:textSize="14sp" />
 
 </LinearLayout>
 EOF
@@ -369,14 +393,32 @@ EOF
         android:textColor="#cccccc"
         android:padding="16dp"
         android:background="#2a2a2a"
-        android:gravity="top" />
+        android:gravity="top"
+        android:scrollbars="vertical" />
 
-    <Button
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Back to Main Menu"
-        android:layout_marginTop="16dp"
-        android:onClick="finish" />
+        android:orientation="horizontal"
+        android:layout_marginTop="16dp">
+
+        <Button
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Back"
+            android:layout_marginRight="8dp"
+            android:onClick="finish" />
+
+        <Button
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Clear Log"
+            android:layout_marginLeft="8dp"
+            android:onClick="clearLog" />
+
+    </LinearLayout>
 
 </LinearLayout>
 EOF
@@ -390,79 +432,13 @@ create_android_resources() {
     <string name="service_description">NFC Card Emulation Service</string>
     <string name="payment_cards">Payment Cards</string>
     <string name="access_cards">Access Control Cards</string>
+    <string name="nfc_required_title">NFC Required</string>
+    <string name="nfc_required_message">This app requires NFC to function. Please enable NFC in your device settings.</string>
+    <string name="permissions_required_title">Permissions Required</string>
+    <string name="permissions_required_message">This app needs various permissions to read and store NFC card data.</string>
+    <string name="storage_permission_title">Storage Access Required</string>
+    <string name="storage_permission_message">This app needs access to storage to save NFC card data.</string>
 </resources>
-EOF
-}
-
-create_main_activity() {
-    local android_version="$1"
-    
-    cat > android/src/com/nfcclone/app/MainActivity.java << EOF
-package com.nfcclone.app;
-
-import android.app.Activity;
-import android.content.Intent;
-import android.os.Bundle;
-import android.widget.Button;
-import android.view.View;
-import java.io.File;
-import android.util.Log;
-
-public class MainActivity extends Activity {
-    private static final String TAG = "MainActivity";
-    
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        
-        createAppDirectories();
-        
-        Button readButton = findViewById(R.id.read_button);
-        readButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Intent intent = new Intent(MainActivity.this, NFCReaderActivity.class);
-                startActivity(intent);
-            }
-        });
-    }
-    
-    private void createAppDirectories() {
-        try {
-            File dataDir = new File(getFilesDir().getAbsolutePath());
-            if (!dataDir.exists()) {
-                dataDir.mkdirs();
-                Log.d(TAG, "Created data directory: " + dataDir.getAbsolutePath());
-            }
-            
-            File cardsDir = new File(dataDir, "cards");
-            if (!cardsDir.exists()) {
-                cardsDir.mkdirs();
-                Log.d(TAG, "Created cards directory: " + cardsDir.getAbsolutePath());
-            }
-            
-            if ($android_version < 11) {
-                try {
-                    File externalDataDir = new File("/storage/emulated/0/Android/data/com.nfcclone.app/files");
-                    if (!externalDataDir.exists()) {
-                        externalDataDir.mkdirs();
-                    }
-                    
-                    File externalCardsDir = new File(externalDataDir, "cards");
-                    if (!externalCardsDir.exists()) {
-                        externalCardsDir.mkdirs();
-                    }
-                } catch (Exception e) {
-                    Log.w(TAG, "Could not create external directories: " + e.getMessage());
-                }
-            }
-            
-        } catch (Exception e) {
-            Log.e(TAG, "Error creating directories: " + e.getMessage());
-        }
-    }
-}
 EOF
 }
 
@@ -479,9 +455,15 @@ if ! command -v aapt >/dev/null 2>&1; then
     echo "Manual build instructions:"
     echo "1. Open Android Studio"
     echo "2. Import the android/ directory as a project"
-    echo "3. Build and install the APK"
+    echo "3. Convert SVG logo to PNG icons using Android Studio"
+    echo "4. Build and install the APK"
     echo ""
-    echo "Or download pre-built APK from releases"
+    echo "Or use online tools to convert the SVG logo to PNG icons:"
+    echo "- 48x48 for mdpi"
+    echo "- 72x72 for hdpi"
+    echo "- 96x96 for xhdpi"
+    echo "- 144x144 for xxhdpi"
+    echo "- 192x192 for xxxhdpi"
     exit 1
 fi
 
@@ -554,11 +536,10 @@ main() {
     create_configuration "$android_version"
     
     create_android_manifest
-    create_apdu_service_config
+    create_app_icons
     create_nfc_tech_filter
     create_android_layouts
     create_android_resources
-    create_main_activity "$android_version"
     create_build_script
     
     check_nfc_capability "$android_version"
@@ -572,19 +553,22 @@ main() {
     echo "[+] Directory structure created"
     echo "[+] Configuration files generated"
     echo "[+] Android app source prepared"
+    echo "[+] App logo SVG created"
     echo ""
     
-    if [ "$android_version" -ge 13 ]; then
-        echo "Android 13+ Instructions:"
+    if [ "$android_version" -ge 14 ]; then
+        echo "Android 14+ Instructions:"
         echo "1. Build and install the Android app"
-        echo "2. Launch the app once to initialize directories"
-        echo "3. Grant any requested permissions"
-        echo "4. Run ./nfc_manager.sh"
+        echo "2. Grant 'All files access' permission when prompted"
+        echo "3. Launch the app once to initialize directories"
+        echo "4. Grant any other requested permissions"
+        echo "5. Run ./nfc_manager.sh"
     elif [ "$android_version" -ge 11 ]; then
         echo "Android 11+ Instructions:"
         echo "1. Build and install the Android app"
-        echo "2. Run ./nfc_manager.sh"
-        echo "3. Cards will be stored in Termux home directory"
+        echo "2. Grant 'All files access' permission in Settings"
+        echo "3. Run ./nfc_manager.sh"
+        echo "4. Cards will be stored in Documents/NFCClone/"
     else
         echo "Android $android_version Instructions:"
         echo "1. Build and install the Android app"
@@ -592,6 +576,10 @@ main() {
         echo "3. Enable NFC in device settings"
     fi
     
+    echo ""
+    echo "IMPORTANT: Convert the app_logo.svg to PNG files:"
+    echo "- Place PNG icons in android/res/mipmap-*/ directories"
+    echo "- Use Android Studio Asset Studio or online converters"
     echo ""
     echo "The installation is complete and optimized for your Android version."
 }
