@@ -18,5 +18,5 @@
 
 6. Reopen Android Studio, then go to Build → Generate App Bundles or APKs → Generate APKs.
 
-	<a href="android_studio_setup.sh" download>⬇️ Android Studio Setup Script</a>
+	<a href="setup/android_studio_setup.sh" download>⬇️ Direct Android Studio Setup Script</a>
 (Can also be used to update files.)
