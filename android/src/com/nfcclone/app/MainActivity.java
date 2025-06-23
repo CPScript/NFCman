@@ -115,7 +115,7 @@ public class MainActivity extends Activity {
                 }
             }
             
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                     permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE);
                 }
@@ -156,7 +156,7 @@ public class MainActivity extends Activity {
     private void showManageStoragePermissionDialog() {
         new AlertDialog.Builder(this)
             .setTitle("Storage Permission Required")
-            .setMessage("This app needs access to manage files for NFC card storage. Please grant 'All files access' permission.")
+            .setMessage("This app needs 'All files access' permission to save NFC card data. Please grant permission in the next screen.")
             .setPositiveButton("Open Settings", (dialog, which) -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     try {
@@ -170,7 +170,7 @@ public class MainActivity extends Activity {
                     }
                 }
             })
-            .setNegativeButton("Cancel", (dialog, which) -> {
+            .setNegativeButton("Continue without", (dialog, which) -> {
                 permissionsGranted = true;
                 onPermissionsResult();
             })
@@ -240,32 +240,32 @@ public class MainActivity extends Activity {
                 Log.d(TAG, "Internal cards directory created: " + created);
             }
             
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-                try {
-                    File externalDataDir = new File("/storage/emulated/0/Android/data/" + getPackageName() + "/files");
-                    if (!externalDataDir.exists()) {
-                        externalDataDir.mkdirs();
-                    }
-                    
-                    File externalCardsDir = new File(externalDataDir, "cards");
-                    if (!externalCardsDir.exists()) {
-                        externalCardsDir.mkdirs();
-                    }
-                    Log.d(TAG, "External directories created");
-                } catch (Exception e) {
-                    Log.w(TAG, "Could not create external directories", e);
-                }
+            File publicDocumentsDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "NFCClone");
+            if (!publicDocumentsDir.exists()) {
+                boolean created = publicDocumentsDir.mkdirs();
+                Log.d(TAG, "Public documents directory created: " + created);
             }
             
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+            File publicCardsDir = new File(publicDocumentsDir, "cards");
+            if (!publicCardsDir.exists()) {
+                boolean created = publicCardsDir.mkdirs();
+                Log.d(TAG, "Public cards directory created: " + created);
+            }
+            
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                 try {
-                    File documentsDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "NFCClone");
-                    if (!documentsDir.exists()) {
-                        documentsDir.mkdirs();
+                    File legacyDir = new File(Environment.getExternalStorageDirectory(), "NFCClone");
+                    if (!legacyDir.exists()) {
+                        legacyDir.mkdirs();
                     }
-                    Log.d(TAG, "Documents directory created");
+                    
+                    File legacyCardsDir = new File(legacyDir, "cards");
+                    if (!legacyCardsDir.exists()) {
+                        legacyCardsDir.mkdirs();
+                    }
+                    Log.d(TAG, "Legacy directories created");
                 } catch (Exception e) {
-                    Log.w(TAG, "Could not create documents directory", e);
+                    Log.w(TAG, "Could not create legacy directories", e);
                 }
             }
             
