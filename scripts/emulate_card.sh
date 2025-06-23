@@ -1,13 +1,23 @@
 #!/bin/bash
-# Script to emulate an NFC card - Android Native Version
 
-ANDROID_DATA_DIR="/storage/emulated/0/Android/data/com.nfcclone.app/files"
-CARDS_DIR="$ANDROID_DATA_DIR/cards"
 PACKAGE_NAME="com.nfcclone.app"
 
 get_card_path() {
     local uid="$1"
-    echo "${CARDS_DIR}/card_${uid}.json"
+    local all_locations=(
+        "$HOME/nfc_cards"
+        "/storage/emulated/0/Documents/NFCClone/cards"
+        "/storage/emulated/0/NFCClone/cards"
+    )
+    
+    for location in "${all_locations[@]}"; do
+        if [ -f "$location/card_${uid}.json" ]; then
+            echo "$location/card_${uid}.json"
+            return 0
+        fi
+    done
+    
+    return 1
 }
 
 list_saved_cards() {
@@ -16,17 +26,39 @@ list_saved_cards() {
     echo "| UID                | Type            |"
     echo "----------------------------------------"
     
-    for card_file in "$CARDS_DIR"/card_*.json; do
-        if [ -f "$card_file" ]; then
-            local uid=$(jq -r '.UID // "Unknown"' "$card_file" 2>/dev/null)
-            local type=$(jq -r '.Technologies[0] // "Unknown"' "$card_file" 2>/dev/null | sed 's/.*\.//')
-            printf "| %-18s | %-15s |\n" "$uid" "${type:0:15}"
+    local all_locations=(
+        "$HOME/nfc_cards"
+        "/storage/emulated/0/Documents/NFCClone/cards"
+        "/storage/emulated/0/NFCClone/cards"
+    )
+    
+    local found_cards=false
+    local processed_uids=""
+    
+    for location in "${all_locations[@]}"; do
+        if [ -d "$location" ]; then
+            for card_file in "$location"/card_*.json; do
+                if [ -f "$card_file" ]; then
+                    local uid=$(jq -r '.UID // "Unknown"' "$card_file" 2>/dev/null)
+                    
+                    if [[ ! "$processed_uids" =~ $uid ]]; then
+                        local type=$(jq -r '.Technologies[0] // "Unknown"' "$card_file" 2>/dev/null | sed 's/.*\.//')
+                        printf "| %-18s | %-15s |\n" "$uid" "${type:0:15}"
+                        found_cards=true
+                        processed_uids="$processed_uids $uid"
+                    fi
+                fi
+            done
         fi
     done
+    
+    if [ "$found_cards" = false ]; then
+        echo "| No cards found    |                 |"
+    fi
+    
     echo "----------------------------------------"
 }
 
-# Check if UID was passed
 if [ $# -lt 1 ]; then
     echo "[!] Usage: $0 <card_uid>"
     exit 1
@@ -35,8 +67,7 @@ fi
 CARD_UID="$1"
 CARD_FILE=$(get_card_path "$CARD_UID")
 
-# Verify card exists
-if [ ! -f "$CARD_FILE" ]; then
+if [ $? -ne 0 ]; then
     echo "[!] Card not found: $CARD_UID"
     echo "[!] Available cards:"
     list_saved_cards
@@ -46,8 +77,7 @@ fi
 echo "[*] Preparing to emulate card: $CARD_UID"
 echo "[*] Card file: $CARD_FILE"
 
-# Create emulation configuration
-CONFIG_FILE="$ANDROID_DATA_DIR/emulation_config.json"
+CONFIG_FILE="$HOME/nfc_cards/emulation_config.json"
 cat > "$CONFIG_FILE" << EOF
 {
     "active": true,
@@ -57,16 +87,21 @@ cat > "$CONFIG_FILE" << EOF
 }
 EOF
 
-# Start the NFC Emulator service
 if am startservice -n "$PACKAGE_NAME/.NfcEmulatorService" \
     --es "action" "start_emulation" \
-    --es "card_uid" "$CARD_UID"; then
+    --es "card_uid" "$CARD_UID" >/dev/null 2>&1; then
     
     echo "[+] NFC emulation service started"
-    termux-notification --title "NFC Emulation Active" \
-                       --content "Emulating card: $CARD_UID" \
-                       --priority high --ongoing
-    termux-toast "Card emulation started for UID: $CARD_UID"
+    
+    if command -v termux-notification >/dev/null 2>&1; then
+        termux-notification --title "NFC Emulation Active" \
+                           --content "Emulating card: $CARD_UID" \
+                           --priority high --ongoing 2>/dev/null || true
+    fi
+    
+    if command -v termux-toast >/dev/null 2>&1; then
+        termux-toast "Card emulation started for UID: $CARD_UID" 2>/dev/null || true
+    fi
 else
     echo "[!] Failed to start NFC emulation service"
     echo "[!] Check if the NFC Clone app is installed correctly"
@@ -74,9 +109,8 @@ else
 fi
 
 echo "[*] Press Ctrl+C to stop emulation"
-trap 'echo "[*] Stopping emulation"; rm -f "$CONFIG_FILE"; am broadcast -a "$PACKAGE_NAME.STOP_EMULATION"; termux-notification-remove nfc_emulation; echo "[+] Emulation stopped"' INT TERM
+trap 'echo "[*] Stopping emulation"; rm -f "$CONFIG_FILE"; am broadcast -a "$PACKAGE_NAME.STOP_EMULATION" >/dev/null 2>&1; if command -v termux-notification-remove >/dev/null 2>&1; then termux-notification-remove nfc_emulation 2>/dev/null || true; fi; echo "[+] Emulation stopped"' INT TERM
 
-# Keep script running while emulation is active
 while [ -f "$CONFIG_FILE" ]; do
     sleep 1
 done
