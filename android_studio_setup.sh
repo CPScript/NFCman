@@ -13,18 +13,21 @@ if ! command -v magick >/dev/null 2>&1; then
     echo "[*] 'magick' command not found. Please install ImageMagick v7+"
     exit 1
 fi
-
-if command -v git >/dev/null 2>&1; then
-    echo "[*] Git is installed: $(git --version)"
-else
+if ! command -v git >/dev/null 2>&1; then
     echo "[*] Git is not installed."
     echo "[*] Please install Git"
     exit 1
 fi
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+  echo "[*] Neither curl nor wget found. Please install one."
+  exit 1
+fi
 
 echo "[*] Deleting default files..."
+rm -rf NFCman
 rm -rf app/src/main/res
-rm app/src/main/AndroidManifest.xml
+rm -rf app/src/main/java/com/nfcclone/app
+rm -f app/src/main/AndroidManifest.xml
 
 echo "[*] Cloning repository"
 git clone https://github.com/CPScript/NFCman
