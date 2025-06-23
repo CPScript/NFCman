@@ -87,6 +87,7 @@ The installation script automatically detects Android version, configures approp
 ### Android Application Build
 
 Framework operation requires building and installing the companion Android application. Open the android directory in Android Studio and configure build parameters according to target device specifications. Generate signed APK through standard Android development workflows and install on target device with appropriate permissions.
+[I need more Help](android_studio_guide.md)
 
 Alternative build approaches include gradle command-line compilation for environments with Android SDK access, though Android Studio provides optimal compatibility verification and dependency management.
 
