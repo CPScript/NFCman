@@ -154,11 +154,11 @@ public class MainActivity extends Activity {
     }
     
     private void showManageStoragePermissionDialog() {
-        new AlertDialog.Builder(this)
-            .setTitle("Storage Permission Required")
-            .setMessage("This app needs 'All files access' permission to save NFC card data. Please grant permission in the next screen.")
-            .setPositiveButton("Open Settings", (dialog, which) -> {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            new AlertDialog.Builder(this)
+                .setTitle("Storage Permission Required")
+                .setMessage("This app needs 'All files access' permission to save NFC card data. Please grant permission in the next screen.")
+                .setPositiveButton("Open Settings", (dialog, which) -> {
                     try {
                         Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
                         intent.setData(Uri.parse("package:" + getPackageName()));
@@ -168,13 +168,16 @@ public class MainActivity extends Activity {
                         Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
                         startActivityForResult(intent, MANAGE_EXTERNAL_STORAGE_REQUEST_CODE);
                     }
-                }
-            })
-            .setNegativeButton("Continue without", (dialog, which) -> {
-                permissionsGranted = true;
-                onPermissionsResult();
-            })
-            .show();
+                })
+                .setNegativeButton("Continue without", (dialog, which) -> {
+                    permissionsGranted = true;
+                    onPermissionsResult();
+                })
+                .show();
+        } else {
+            permissionsGranted = true;
+            onPermissionsResult();
+        }
     }
     
     private void showNfcSettingsDialog() {
