@@ -6,14 +6,15 @@
 
     <uses-sdk
         android:minSdkVersion="19"
-        android:targetSdkVersion="33" />
+        android:targetSdkVersion="34" />
 
-    <!-- NFC Permissions -->
     <uses-permission android:name="android.permission.NFC" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
-    <!-- Hardware Requirements -->
     <uses-feature
         android:name="android.hardware.nfc"
         android:required="true" />
@@ -28,7 +29,6 @@
         android:theme="@style/Theme.AppCompat.NoActionBar"
         android:requestLegacyExternalStorage="true">
         
-        <!-- Main Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -40,7 +40,6 @@
             </intent-filter>
         </activity>
         
-        <!-- NFC Reader Activity -->
         <activity
             android:name=".NFCReaderActivity"
             android:exported="true"
@@ -65,7 +64,6 @@
                 android:resource="@xml/nfc_tech_filter" />
         </activity>
         
-        <!-- NFC Emulator Service -->
         <service
             android:name=".NfcEmulatorService"
             android:exported="true"
@@ -79,7 +77,6 @@
                 android:resource="@xml/apduservice" />
         </service>
         
-        <!-- Broadcast Receiver for Stop Emulation -->
         <receiver
             android:name=".EmulationControlReceiver"
             android:exported="false">
