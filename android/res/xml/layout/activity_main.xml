@@ -10,7 +10,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="NFC Clone"
+        android:text="NFCman"
         android:textSize="32sp"
         android:textColor="#ffffff"
         android:textAlignment="center"
