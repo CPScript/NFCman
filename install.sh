@@ -315,8 +315,7 @@ detect_downloader() {
 }
 
 pc_install() {
-    # SCRIPT_URL="https://raw.githubusercontent.com/CPScript/NFCman/main/setup/android_studio_setup.sh"
-    SCRIPT_URL="https://raw.githubusercontent.com/Lolig4/NFCman/main/setup/android_studio_setup.sh"
+    SCRIPT_URL="https://raw.githubusercontent.com/CPScript/NFCman/main/setup/android_studio_setup.sh"
     SCRIPT_PATH="$(dirname "$(realpath "$0")")/android_studio_setup.sh"
 
     if [[ $DOWNLOADER == "curl" ]]; then
@@ -332,8 +331,7 @@ pc_install() {
 update_script() {
     echo "[*] Updating script to latest version..."
         
-    # SCRIPT_URL="https://raw.githubusercontent.com/CPScript/NFCman/main/install.sh"
-    SCRIPT_URL="https://raw.githubusercontent.com/Lolig4/NFCman/main/install.sh"
+    SCRIPT_URL="https://raw.githubusercontent.com/CPScript/NFCman/main/install.sh"
     SCRIPT_PATH="$(realpath "$0")"
     TMP_FILE="$(mktemp)"
 
@@ -398,11 +396,10 @@ exit 1
 
 :windows
 @echo off
-echo Windows
+
 setlocal EnableDelayedExpansion
 
-:: set "SCRIPT_URL=https://raw.githubusercontent.com/CPScript/NFCman/main/install.sh"
-set "UPDATE_URL=https://raw.githubusercontent.com/Lolig4/NFCman/main/install.sh"
+set "SCRIPT_URL=https://raw.githubusercontent.com/CPScript/NFCman/main/install.sh"
 set "THIS_SCRIPT=%~f0"
 set "TMP_FILE=%TEMP%\install_update.sh"
 
