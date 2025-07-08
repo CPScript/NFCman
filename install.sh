@@ -346,6 +346,8 @@ update_script() {
     cp "$SCRIPT_PATH" "$SCRIPT_PATH.bak"
     mv "$TMP_FILE" "$SCRIPT_PATH"
     chmod +x "$SCRIPT_PATH"
+    echo "[*] Restarting script with updated version..."
+    echo ""
     exec "$SCRIPT_PATH" "$@" "--updated"
 }
 
@@ -390,5 +392,5 @@ if [ "$FORCE_TERMUX" = "1" ]; then
 elif [ "$FORCE_PC" = "1" ]; then
     pc_install
 else
-    main
+    main "$@"
 fi
