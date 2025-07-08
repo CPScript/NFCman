@@ -1,3 +1,4 @@
+goto windows
 #!/bin/bash
 
 set -e
@@ -8,7 +9,7 @@ CONTRIBUTERS
 @Lolig4 | Setup scripts and bug help
 """
 
-sleep (2)
+sleep 2
 
 detect_environment() {
     if [ -d "/data/data/com.termux" ] || [ -d "/data/data/com.termux.fdroid" ]; then
@@ -301,264 +302,61 @@ EOF
     main
 }
 
-pc_install() {
-    echo "╔═══════════════════════════════════════════════════════════════╗"
-    echo "║                     Setup Android Studio                      ║"
-    echo "║                           PC Mode                             ║"
-    echo "╚═══════════════════════════════════════════════════════════════╝"
-
-    echo "[*] Setting up PC development environment..."
-
-    if command -v inkscape >/dev/null 2>&1; then
-        IMG_CMD="inkscape"
-    elif command -v magick >/dev/null 2>&1; then
-        IMG_CMD="magick"
-    else
-        echo "[*] Neither Inkscape or ImageMagick v7+ found. Please install one."
-        echo "[*] Please note that ImageMagick can't produce a transparent background."
-        exit 1
-    fi
-
-    if ! command -v git >/dev/null 2>&1; then
-        echo "[*] Git is not installed."
-        echo "[*] Please install Git"
-        exit 1
-    fi
-
+DOWNLOADER=""
+detect_downloader() {
     if command -v curl >/dev/null 2>&1; then
         DOWNLOADER="curl"
     elif command -v wget >/dev/null 2>&1; then
         DOWNLOADER="wget"
     else
-        echo "[*] Neither curl or wget found. Please install one."
+        echo "[*] Neither curl nor wget found. Please install one."
         exit 1
     fi
+}
 
-    echo "[*] Setting up Android Studio project structure..."
+pc_install() {
+    # SCRIPT_URL="https://raw.githubusercontent.com/CPScript/NFCman/main/setup/android_studio_setup.sh"
+    SCRIPT_URL="https://raw.githubusercontent.com/Lolig4/NFCman/main/setup/android_studio_setup.sh"
+    SCRIPT_PATH="$(dirname "$(realpath "$0")")/android_studio_setup.sh"
 
-    if [ ! -d "app" ]; then
-        echo "[!] This script should be run from an Android Studio project root"
-        echo "[!] Expected 'app' directory not found"
-        echo ""
-        echo "Instructions:"
-        echo "1. Create a new Android Studio project"
-        echo "2. Copy this script to the project root"
-        echo "3. Run the script from there"
-        exit 1
-    fi
-
-    URL="https://avatars.githubusercontent.com/u/83523587?s=48&v=4"
-    DEST="ic_launcher.jpeg"
-    readarray -t SVG_PATHS < <(find . -type f -iname '*.svg')
-    count=${#SVG_PATHS[@]}
-    
-    if (( count == 0 )); then
-        echo "[*] No SVG found!"
-        echo "[*] Would you like to use CPScript's profile picture as a fallback? (y/N)"
-        read -r REPLY
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo "[*] Download CPScript's profile picture..."
-            if [[ $DOWNLOADER == "curl" ]]; then
-                curl -L "$URL" -o "$DEST"
-            elif [[ $DOWNLOADER == "wget" ]]; then
-                wget -O "$DEST" "$URL"
-            fi
-            IMAGE=$DEST
-        else
-            echo "[*] Please drop a SVG into your Android Studio project."
-            exit 1
-        fi
-    elif (( count == 1 )); then
-        IMAGE="${SVG_PATHS[0]}"
-        echo "[*] SVG found: $IMAGE"
+    if [[ $DOWNLOADER == "curl" ]]; then
+        curl -L "$SCRIPT_URL" -o "$SCRIPT_PATH"
     else
-        echo "[*] More than one SVG found! Please ensure that only one SVG is in your Android Studio project."
-        exit 1
+        wget -O "$SCRIPT_PATH" "$SCRIPT_URL"
     fi
 
-    echo "[*] Deleting default files..."
-    rm -rf app/src/main/res
-    rm -rf app/src/main/java/com/nfcclone/app
-    rm -f app/src/main/AndroidManifest.xml
+    chmod +x "$SCRIPT_PATH"
+    exec "$SCRIPT_PATH" "$@"
+}
 
-    echo "[*] Cloning repository..."
-    git clone https://github.com/CPScript/NFCman
-
-    echo "[*] Copying files into project..."
-    cp -r NFCman/android/res app/src/main/
-    cp -r NFCman/android/src/com app/src/main/java/
-    cp NFCman/android/AndroidManifest.xml app/src/main/
-
-    echo "[*] Extracting EmulationControlReceiver class..."
-    SOURCE_FILE="app/src/main/java/com/nfcclone/app/NfcEmulatorService.java"
-    TARGET_FILE="app/src/main/java/com/nfcclone/app/EmulationControlReceiver.java"
-
-    if [ -f "$SOURCE_FILE" ]; then
-        awk '
-          /\/\* EmulationControlReceiver.java \*\// { inside=1; next }
-          inside {
-            brace_level += gsub(/\{/, "{")
-            brace_level -= gsub(/\}/, "}")
-            print
-            if (brace_level == 0 && /}/) exit
-          }
-        ' "$SOURCE_FILE" > "$TARGET_FILE"
+update_script() {
+    echo "[*] Updating script to latest version..."
         
-        awk '
-          /\/\* EmulationControlReceiver.java \*\// { inside=1; next }
-          inside {
-            brace_level += gsub(/\{/, "{")
-            brace_level -= gsub(/\}/, "}")
-            if (brace_level == 0 && /}/) { inside=0; next }
-            next
-          }
-          { print }
-        ' "$SOURCE_FILE" > temp.java && mv temp.java "$SOURCE_FILE"
-        
-        echo "[*] EmulationControlReceiver class extracted successfully"
+    # SCRIPT_URL="https://raw.githubusercontent.com/CPScript/NFCman/main/install.sh"
+    SCRIPT_URL="https://raw.githubusercontent.com/Lolig4/NFCman/main/install.sh"
+    SCRIPT_PATH="$(realpath "$0")"
+    TMP_FILE="$(mktemp)"
+
+    if [[ $DOWNLOADER == "curl" ]]; then
+        curl -fsSL "$SCRIPT_URL" -o "$TMP_FILE"
+    else
+        wget -q "$SCRIPT_URL" -O "$TMP_FILE"
     fi
 
-    echo "[*] Cleaning XML files..."
-    find app/src/main/res -type f -name "*.xml" -exec sed -i '/^<!-- .* -->$/d' {} + 2>/dev/null || \
-    find app/src/main/res -type f -name "*.xml" -exec sed '/^<!-- .* -->$/d' {} \; 2>/dev/null || true
-
-    echo "[*] Create ic_launcher.png..."
-    declare -A SIZES=(
-      [mdpi]=48
-      [hdpi]=72
-      [xhdpi]=96
-      [xxhdpi]=144
-      [xxxhdpi]=192
-    )
-
-    for DENSITY in "${!SIZES[@]}"; do
-      SIZE=${SIZES[$DENSITY]}
-      OUT_DIR="app/src/main/res/mipmap-$DENSITY"
-      OUT_FILE="$OUT_DIR/ic_launcher.png"
-      
-      echo "[*] Generating ${DENSITY} (${SIZE}×${SIZE})..."
-      mkdir -p "$OUT_DIR"
-      
-      if [[ $IMG_CMD == "inkscape" ]]; then
-        inkscape "$IMAGE" \
-          --export-background-opacity=0 \
-          --export-filename="$OUT_FILE" \
-          --export-width="$SIZE" \
-          --export-height="$SIZE"
-      elif [[ $IMG_CMD == "magick" ]]; then
-        magick "$IMAGE" -resize "${SIZE}x${SIZE}" "$OUT_FILE"
-      fi
-    done
-
-    echo "[*] Setting up Gradle configuration..."
-    
-    cat > app/build.gradle << 'EOF'
-apply plugin: 'com.android.application'
-
-android {
-    compileSdkVersion 34
-    buildToolsVersion "34.0.0"
-    
-    defaultConfig {
-        applicationId "com.nfcclone.app"
-        minSdkVersion 19
-        targetSdkVersion 34
-        versionCode 2
-        versionName "2.0"
-        
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-    }
-    
-    buildTypes {
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            debuggable false
-        }
-        debug {
-            debuggable true
-            minifyEnabled false
-        }
-    }
-    
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
-    }
-    
-    packagingOptions {
-        pickFirst '**/libjsc.so'
-        pickFirst '**/libc++_shared.so'
-    }
-}
-
-dependencies {
-    implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'androidx.core:core:1.10.1'
-    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    implementation 'com.google.android.material:material:1.9.0'
-    
-    testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
-}
-EOF
-
-    cat > app/proguard-rules.pro << 'EOF'
-# Add project specific ProGuard rules here.
-
-# Keep NFC related classes
--keep class com.nfcclone.app.** { *; }
-
-# Keep JSON parsing
--keepattributes Signature
--keepattributes *Annotation*
--keep class org.json.** { *; }
-
-# Keep NFC technology classes
--keep class android.nfc.** { *; }
--keep class android.nfc.tech.** { *; }
-
-# Keep HCE service
--keep class * extends android.nfc.cardemulation.HostApduService {
-    public <init>(...);
-    public <methods>;
-}
-
-# Keep broadcast receivers
--keep class * extends android.content.BroadcastReceiver {
-    public <init>(...);
-    public <methods>;
-}
-EOF
-
-    echo "[*] Cleaning up..."
-    rm -rf NFCman
-    if [[ $IMAGE == "ic_launcher.jpeg" ]]; then
-        rm $IMAGE
-    fi
-
-    echo ""
-    echo "╔═══════════════════════════════════════════════════════════════╗"
-    echo "║                    PC Setup Complete                          ║"
-    echo "╚═══════════════════════════════════════════════════════════════╝"
-    echo "[+] Android Studio project structure created"
-    echo "[+] Repository files copied to proper locations"
-    echo "[+] App icon configured from SVG/fallback image"
-    echo "[+] Gradle configuration applied"
-    echo "[+] ProGuard rules configured"
-    echo ""
-    echo "Next steps:"
-    echo "1. Open this project in Android Studio"
-    echo "2. Sync the project (File → Sync Project with Gradle Files)"
-    echo "3. Build the project (Build → Make Project)"
-    echo "4. Generate APK (Build → Build Bundle(s) / APK(s) → Build APK(s))"
-    echo "5. Install APK on your Android device"
-    echo "6. Run the Termux script on your device: ./nfc_manager.sh"
-    echo ""
+    cp "$SCRIPT_PATH" "$SCRIPT_PATH.bak"
+    mv "$TMP_FILE" "$SCRIPT_PATH"
+    chmod +x "$SCRIPT_PATH"
+    exec "$SCRIPT_PATH" "$@" "--updated"
 }
 
 main() {
+    detect_downloader
+
+    if [[ "$1" == "--updated" ]]; then
+        shift
+    else
+        update_script "$@"
+    fi
     local environment=$(detect_environment)
     
     case $environment in
