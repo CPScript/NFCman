@@ -394,3 +394,35 @@ elif [ "$FORCE_PC" = "1" ]; then
 else
     main "$@"
 fi
+exit 1
+
+:windows
+@echo off
+echo Windows
+setlocal EnableDelayedExpansion
+
+:: set "SCRIPT_URL=https://raw.githubusercontent.com/CPScript/NFCman/main/install.sh"
+set "UPDATE_URL=https://raw.githubusercontent.com/Lolig4/NFCman/main/install.sh"
+set "THIS_SCRIPT=%~f0"
+set "TMP_FILE=%TEMP%\install_update.sh"
+
+set "UPDATED=false"
+for %%A in (%*) do (
+    if "%%A"=="--updated" set "UPDATED=true"
+)
+
+if /I "!UPDATED!"=="false" (
+    powershell -Command "Invoke-WebRequest -Uri '!UPDATE_URL!' -OutFile '!TMP_FILE!'"
+    copy /Y "!THIS_SCRIPT!" "!THIS_SCRIPT!.bak" >nul
+    move /Y "!TMP_FILE!" "!THIS_SCRIPT!" >nul
+    start "" cmd /c ""!THIS_SCRIPT!" --updated"
+    exit /b
+)
+
+:: set "SCRIPT_URL=https://raw.githubusercontent.com/CPScript/NFCman/main/setup/windows_setup_script.bat"
+set "SETUP_URL=https://raw.githubusercontent.com/Lolig4/NFCman/main/setup/windows_setup_script.bat"
+set "SCRIPT_DIR=%~dp0"
+set "SETUP_PATH=%SCRIPT_DIR%android_studio_setup.bat"
+powershell -Command "Invoke-WebRequest -Uri '!SETUP_URL!' -OutFile '!SETUP_PATH!'"
+start "" cmd /c ""!SETUP_PATH!""
+exit /b
